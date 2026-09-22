@@ -1,9 +1,10 @@
 import os
+import secrets
 from contextlib import asynccontextmanager
 from math import ceil
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, HTTPException, FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -43,6 +44,14 @@ GAMES_DIR.mkdir(parents=True, exist_ok=True)
 # A month, so a tester's phone keeps the cookie across the whole event. The
 # claim itself expires long before this; the cookie only has to outlive it.
 COOKIE_MAX_AGE = 30 * 24 * 60 * 60
+CSRF_COOKIE_NAME = "beeplay_claim_csrf"
+CSRF_TOKEN_BYTES = 32
+
+# The current public deployment is IP-only HTTP. Claims are bearer-token
+# authentication, so production must not issue them over that transport. This
+# opt-in keeps local HTTP development convenient without silently weakening a
+# real deployment.
+ALLOW_INSECURE_CLAIMS = os.environ.get("BEEPLAY_ALLOW_INSECURE_CLAIMS") == "1"
 
 
 @asynccontextmanager
@@ -58,6 +67,19 @@ def current_identity(
     identity = resolve_cookie(session, request.cookies.get(COOKIE_NAME))
     request.state.identity = identity
     return identity
+
+
+def claims_are_secure(request: Request) -> bool:
+    """Whether this request may issue or use a bearer claim cookie."""
+    return request.url.scheme == "https" or ALLOW_INSECURE_CLAIMS
+
+
+def csrf_token(request: Request) -> tuple[str, bool]:
+    """Return a double-submit CSRF token and whether it needs setting."""
+    token = request.cookies.get(CSRF_COOKIE_NAME)
+    if token:
+        return token, False
+    return secrets.token_urlsafe(CSRF_TOKEN_BYTES), True
 
 
 app = FastAPI(
@@ -159,12 +181,15 @@ def claim_grid(
     user, _ = identity
     now = utcnow()
     free_at = next_free_at(session)
-    return templates.TemplateResponse(
+    token, set_csrf_cookie = csrf_token(request)
+    response = templates.TemplateResponse(
         request,
         "base.html",
         {
             "view": "claim",
             "current_user": user,
+            "claims_enabled": claims_are_secure(request),
+            "csrf_token": token,
             "notice": notice,
             "identities": [
                 {
@@ -179,15 +204,32 @@ def claim_grid(
             ),
         },
     )
+    if set_csrf_cookie:
+        response.set_cookie(
+            CSRF_COOKIE_NAME,
+            token,
+            max_age=COOKIE_MAX_AGE,
+            httponly=True,
+            samesite="lax",
+            secure=request.url.scheme == "https",
+        )
+    return response
 
 
-@app.get("/claim/{slug}")
+@app.post("/claim/{slug}")
 def claim_identity(
     slug: str,
     request: Request,
+    csrf_token: str = "",
     session: Session = Depends(get_session),
     identity: tuple[User | None, str] = Depends(current_identity),
 ) -> Response:
+    if not claims_are_secure(request):
+        raise HTTPException(status_code=403, detail="Claims require HTTPS")
+    csrf_cookie = request.cookies.get(CSRF_COOKIE_NAME)
+    if not csrf_cookie or not secrets.compare_digest(csrf_token, csrf_cookie):
+        raise HTTPException(status_code=403, detail="Invalid claim request")
+
     holder, _ = identity
     token = claim(session, slug, holder)
     if token is None:
@@ -200,8 +242,7 @@ def claim_identity(
         max_age=COOKIE_MAX_AGE,
         httponly=True,
         samesite="lax",
-        # No secure flag: the deployment serves plain HTTP on a bare IP, and a
-        # secure cookie would simply never be sent back.
+        secure=request.url.scheme == "https",
     )
     return response
 

@@ -4,6 +4,14 @@ This deployment serves Beeplay directly on the server's public IP over HTTP.
 Nginx listens on port 80, serves assets and game artifacts from disk, and
 proxies application requests to uvicorn on `127.0.0.1:8000`.
 
+## HTTPS is required for tester identities
+
+The identity cookie is a bearer credential. The claim feature deliberately
+refuses to issue it over plain HTTP, so configure TLS and ensure Nginx passes
+`X-Forwarded-Proto: https` before deploying this branch. The current IP-only
+HTTP configuration remains suitable for browsing the prototype but not for
+claiming identities.
+
 For the current server, open `http://47.251.140.176/` after deployment.
 
 ## Install

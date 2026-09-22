@@ -98,14 +98,24 @@ def claim(session: Session, slug: str, holder: User | None = None) -> str | None
         return None
 
     now = utcnow()
+    holder_token = holder.claim_token if holder is not None else None
     if holder is not None and holder.id == user.id:
         # Already theirs. Refresh rather than reissue, so the cookie they are
         # holding stays valid.
-        user.last_seen_at = now
+        renewed = session.execute(
+            update(User)
+            .where(User.id == user.id, User.claim_token == holder_token)
+            .values(last_seen_at=now)
+        )
+        if renewed.rowcount != 1:
+            session.rollback()
+            return None
         session.commit()
-        return user.claim_token
+        return holder_token
 
-    token = secrets.token_hex(4)
+    # This is a bearer credential, not merely an opaque display ID. 256 bits
+    # makes guessing it infeasible even if the claim endpoint is exposed.
+    token = secrets.token_hex(32)
     taken = session.execute(
         update(User)
         .where(
@@ -118,19 +128,22 @@ def claim(session: Session, slug: str, holder: User | None = None) -> str | None
         session.rollback()
         return None
 
-    # Switching identities frees the old one immediately: the tester chose to
-    # leave, and at a booth the pool is the scarce thing.
+    # Switching identities frees the old one immediately. Guard the release by
+    # the token that authenticated this request: two concurrent requests from
+    # one browser must not each reserve a new identity and strand one of them.
     if holder is not None:
-        release(session, holder)
+        released = session.execute(
+            update(User)
+            .where(User.id == holder.id, User.claim_token == holder_token)
+            .values(last_seen_at=None, claim_token=None)
+        )
+        if released.rowcount != 1:
+            session.rollback()
+            return None
 
     session.commit()
     session.refresh(user)
     return token
-
-
-def release(session: Session, user: User) -> None:
-    user.last_seen_at = None
-    user.claim_token = None
 
 
 def touch(session: Session, user: User) -> None:

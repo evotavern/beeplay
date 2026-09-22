@@ -1090,10 +1090,11 @@
     }
     .claim-card {
       display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
-      padding: 16px; border-radius: 20px; background: #fff;
+      width: 100%; padding: 16px; border-radius: 20px; background: #fff;
       border: 1px solid #ecebe8; text-decoration: none; color: inherit;
-      transition: transform .12s ease, border-color .12s ease;
+      font: inherit; text-align: left; transition: transform .12s ease, border-color .12s ease;
     }
+    .claim-action { margin: 0; }
     .claim-card:hover { transform: translateY(-2px); border-color: var(--lime, #d7f36b); }
     .claim-card.mine { border-color: #171b1a; border-width: 2px; }
     /* Taken identities are a div, not a link, so there is nothing to tap. */

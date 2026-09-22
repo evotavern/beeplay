@@ -82,6 +82,23 @@ class ClaimTests(unittest.TestCase):
         self.assertIsNotNone(claim(self.session, "bee-2", holder))
         self.assertFalse(is_claimed(self.user("bee-1")))
 
+    def test_a_stale_switch_cannot_reserve_another_identity(self) -> None:
+        self.session.add(identity("bee-3", 2))
+        self.session.commit()
+        claim(self.session, "bee-1")
+        stale_session = Session(self.engine)
+        stale_holder = stale_session.query(User).filter_by(slug="bee-1").one()
+
+        # A first request has already switched away from bee-1. A concurrent
+        # request still holding its old ORM value must roll back its new claim.
+        try:
+            self.assertIsNotNone(claim(self.session, "bee-2", self.user("bee-1")))
+            self.assertIsNone(claim(stale_session, "bee-3", stale_holder))
+        finally:
+            stale_session.close()
+        self.session.expire_all()
+        self.assertFalse(is_claimed(self.user("bee-3")))
+
     def test_a_stale_claim_is_claimable_again(self) -> None:
         claim(self.session, "bee-1")
         self.user("bee-1").last_seen_at = utcnow() - CLAIM_TTL - timedelta(minutes=1)

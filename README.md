@@ -59,7 +59,7 @@ tools/export-icons.cjs     # 图标导出脚本
 ## 测试身份
 
 黑客松测试者在 `/claim` 领取 8 个预置身份之一。没有账号系统，也没有密码：
-点一张卡片就会拿到一个 cookie（`beeplay_user=<slug>.<token>`），个人页随即
+在 HTTPS 连接上提交一张身份卡片，会拿到一个 cookie（`beeplay_user=<slug>.<token>`），个人页随即
 显示这个身份自己的作品。
 
 - 领取是独占的：已被领取的身份显示为灰色，无法再次领取。
@@ -67,6 +67,7 @@ tools/export-icons.cjs     # 图标导出脚本
 - 只要还在使用就不会被收回：每次请求都会刷新 `last_seen_at`。
 - 点「切换身份」会立即释放原来的身份，把它放回可领取的池子。
 - 首页、探索和游戏流不需要身份，未领取也能试玩；只有个人页会跳转到 `/claim`。
+- 领取是 POST 请求，并带有 CSRF token；生产环境不会在纯 HTTP 上签发身份 cookie。仅本地开发可设置 `BEEPLAY_ALLOW_INSECURE_CLAIMS=1`。
 
 需要提前清空全部领取状态时：
 

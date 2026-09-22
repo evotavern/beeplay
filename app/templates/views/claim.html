@@ -1,7 +1,6 @@
       <section class="view active" id="claimView" data-view="claim">
-        {# Plain <a href> on purpose. htmx only intercepts elements carrying
-           hx-* attributes, so these links navigate normally and the browser
-           follows the redirect that sets the cookie. #}
+        {# Claims change server state, so the cards submit an ordinary POST
+           form with a double-submit CSRF token. #}
         {% macro card_body(item) %}
           <img class="claim-avatar" src="{{ avatar(item.user.avatar_fill) }}" alt="" />
           <strong>{{ item.user.name }}</strong>
@@ -17,6 +16,9 @@
           <header class="claim-head">
             <h1>选择一个身份</h1>
             <p>测试用的临时身份，闲置两小时后会自动释放。想换一个随时回到这里。</p>
+            {% if not claims_enabled %}
+              <div class="claim-notice">领取身份需要 HTTPS 连接。</div>
+            {% endif %}
             {% if notice == 'taken' %}
               <div class="claim-notice">这个身份刚刚被别人领走了，换一个吧。</div>
             {% elif notice == 'stolen' %}
@@ -28,10 +30,12 @@
           </header>
           <div class="claim-grid">
             {% for item in identities %}
-              {% if item.claimed and not item.mine %}
+              {% if item.claimed and not item.mine or not claims_enabled %}
                 <div class="claim-card taken" aria-disabled="true">{{ card_body(item) }}</div>
               {% else %}
-                <a class="claim-card{% if item.mine %} mine{% endif %}" href="/claim/{{ item.user.slug }}">{{ card_body(item) }}</a>
+                <form class="claim-action" method="post" action="/claim/{{ item.user.slug }}?csrf_token={{ csrf_token }}">
+                  <button class="claim-card{% if item.mine %} mine{% endif %}" type="submit">{{ card_body(item) }}</button>
+                </form>
               {% endif %}
             {% endfor %}
           </div>
