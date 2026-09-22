@@ -35,7 +35,7 @@ app = FastAPI(title="Beeplay", lifespan=lifespan)
 
 app.mount("/assets", StaticFiles(directory=BASE_DIR / "assets"), name="assets")
 
-# Development convenience: in production Caddy serves /games/* straight from
+# Development convenience: in production Nginx serves /games/* straight from
 # disk, so game files never go through uvicorn's threadpool.
 app.mount("/games", StaticFiles(directory=GAMES_DIR), name="games")
 
