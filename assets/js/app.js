@@ -196,8 +196,11 @@
     var choice = event.target.closest("[data-modal-choice]");
     if (!choice) return;
     closeCreateModal();
+    // No pushState here: htmx.ajax has no source element, so it resolves
+    // hx-push-url from <body>, where it is true, and pushes /create itself.
+    // Pushing again stacked a second identical entry, which swallowed the
+    // first Back press — and left htmx no snapshot for the entry it never saw.
     htmx.ajax("GET", "/create", { target: "#viewport", swap: "innerHTML" }).then(function () {
-      history.pushState({}, "", "/create");
       var ideaInput = document.getElementById("ideaInput");
       if (!ideaInput) return;
       if (choice.dataset.modalChoice === "habit") {
