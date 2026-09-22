@@ -224,9 +224,15 @@
   //
   // The host is NEVER reparented. Moving an iframe node in the DOM reloads its
   // document in every browser, which would destroy exactly the session this
-  // design exists to preserve. It is positioned over the playing card by
-  // setting style from the card's measured box — never by appendChild.
+  // design exists to preserve. So the iframe is appended once and only ever
+  // shown or hidden — never moved.
+  //
+  // The host is full-bleed (position:fixed, inset:0, z-index:60), which covers
+  // beeplay's topbar and bottom nav as well as the card. That is what resolves
+  // double chrome: the game's own topbar and journey nav become the only
+  // chrome on screen, and nothing in the artifact had to change.
   var gameHost = document.getElementById("gameHost");
+  var gameStop = document.getElementById("gameStop");
 
   // One live session at a time: {hash, frame, card, active}. `active` false
   // means paused — the iframe is still mounted and still holding game state,
@@ -235,17 +241,6 @@
 
   function gamePlaying() {
     return !!(session && session.active);
-  }
-
-  // Position the host over its card. Called on mount and whenever the card
-  // could have moved under it.
-  function anchorHost() {
-    if (!session || !session.card || !gameHost) return;
-    var box = session.card.getBoundingClientRect();
-    gameHost.style.top = box.top + "px";
-    gameHost.style.left = box.left + "px";
-    gameHost.style.width = box.width + "px";
-    gameHost.style.height = box.height + "px";
   }
 
   function mountGame(card, hash) {
@@ -264,17 +259,19 @@
     session.card = card;
     session.active = true;
     document.body.classList.add("playing");
+    gameHost.hidden = false;
     if (button) { button.classList.add("active"); button.textContent = "Ⅱ"; }
-    anchorHost();
   }
 
   function pauseGame() {
     if (!session) return;
     session.active = false;
     document.body.classList.remove("playing");
-    // Hidden, not unmounted: the document keeps running and keeps its state,
-    // so resuming returns the user to their half-made cup. Hiding via a class
-    // rather than display:none, which risks pausing or reloading the frame.
+    gameHost.hidden = true;
+    // Hidden, not unmounted. The iframe stays in the DOM holding the game's
+    // JS state, so resuming returns the user to their half-made cup. This is
+    // the whole reason the host is body-level: a paused session has to survive
+    // an htmx nav swap, and anything inside #viewport would not.
     var button = session.card && session.card.querySelector('[data-game-action="play"]');
     if (button) { button.classList.remove("active"); button.textContent = "▶"; }
   }
@@ -312,10 +309,6 @@
     resumeGame(card, button);
   }
 
-  // Keep the host over its card if the viewport changes under it.
-  window.addEventListener("resize", anchorHost);
-  window.addEventListener("scroll", anchorHost, { passive: true });
-
   // Nav guard. Hiding beeplay's chrome while body.playing removes the bottom
   // nav from the screen, so stray taps largely disappear — but the topbar
   // brand and nav links still carry hx-get, so leaving must stay deliberate.
@@ -335,16 +328,16 @@
   // A paused session survives the swap because the host is outside #viewport.
   document.body.addEventListener("htmx:afterSwap", function (event) {
     if (event.detail.target.id !== "viewport" || !session) return;
-    var card = document.querySelector('.game-card[data-artifact="' + session.hash + '"]');
-    session.card = card || null;
-    if (card) anchorHost();
+    session.card = document.querySelector(
+      '.game-card[data-artifact="' + session.hash + '"]'
+    );
   });
 
-  // TODO(contract): the exit control is body-level markup owned by the other
-  // session — the card's own Ⅱ cannot serve, because .game-card sets
-  // isolation:isolate and a body-level host paints over the whole card
-  // including its z-index:4 buttons. Wire the real selector when it lands.
-  // Escape is an interim exit so the feed lock is never inescapable.
+  // The exit control belongs to the host, not the card: the full-bleed
+  // overlay covers .game-actions, so the card's own Ⅱ is unreachable while
+  // playing. It pauses rather than ends — see pauseGame().
+  if (gameStop) gameStop.addEventListener("click", pauseGame);
+
   document.addEventListener("keydown", function (event) {
     if (event.key === "Escape" && gamePlaying()) pauseGame();
   });
