@@ -1289,22 +1289,9 @@
   <div class="toast" id="toast" role="status"></div>
 
   <script>
-    const works = [
-      { title: "Jungle Escape", author: "Mia Chen", category: "relax", emoji: "🌿", art: "art-one", views: "4.9K", likes: "1.2K" },
-      { title: "Color Keyboard", author: "Scarlett", category: "focus", emoji: "▦", art: "art-two", views: "12K", likes: "3.4K" },
-      { title: "Bounce Lab", author: "oxo studio", category: "physics", emoji: "◌", art: "art-four", views: "21K", likes: "5.1K" },
-      { title: "Swab Logic", author: "Mia", category: "puzzle", emoji: "9", art: "art-three", views: "8.8K", likes: "2.6K" },
-      { title: "Tiny Weather", author: "Bee Lab", category: "focus", emoji: "☁", art: "art-four", views: "6.3K", likes: "1.8K" },
-      { title: "Paper Cut Party", author: "Skyyyyyy", category: "relax", emoji: "✿", art: "art-three", views: "2M", likes: "26K" },
-      { title: "Orbit Catch", author: "sikramay2.0", category: "physics", emoji: "◎", art: "art-two", views: "65K", likes: "8.2K" },
-      { title: "Make 9 Become 6", author: "Sam", category: "puzzle", emoji: "6", art: "art-one", views: "1M", likes: "16K" }
-    ];
+    const works = {{ works | tojson }};
 
-    const profileWorks = [
-      { title: "My Focus Island", author: "Jastin Anna", category: "focus", emoji: "☀", art: "art-one", views: "128", likes: "24" },
-      { title: "A Little Bee", author: "Jastin Anna", category: "relax", emoji: "🐝", art: "art-two", views: "86", likes: "19" },
-      { title: "Daily Spark", author: "Jastin Anna", category: "puzzle", emoji: "✦", art: "art-three", views: "64", likes: "12" }
-    ];
+    const profileWorks = {{ profile_works | tojson }};
 
     const viewEls = [...document.querySelectorAll(".view")];
     const navEls = [...document.querySelectorAll(".nav-item")];

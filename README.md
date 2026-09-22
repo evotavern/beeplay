@@ -13,7 +13,14 @@ Beeplay 是一个手机端优先的互动游戏与创作产品原型。首页采
 
 ## 本地预览
 
-直接打开 `index.html` 即可预览当前原型。
+原型现在由 FastAPI + Jinja 模板提供服务：
+
+```bash
+uv sync
+uv run uvicorn app.main:app --reload --port 8010
+```
+
+然后访问 http://127.0.0.1:8010/ 。
 
 如果需要重新生成图标：
 
@@ -25,7 +32,9 @@ npm run icons
 ## 项目结构
 
 ```text
-index.html                 # 当前交互原型
+app/main.py                # FastAPI 应用入口
+app/data.py                # 页面种子数据（后续由数据库取代）
+app/templates/index.html   # 当前交互原型模板
 assets/brand/              # 品牌参考资源
 assets/icons/              # Logo、吉祥物和功能图标
 tools/export-icons.cjs     # 图标导出脚本
