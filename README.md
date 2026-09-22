@@ -33,7 +33,10 @@ npm run icons
 
 ```text
 app/main.py                # FastAPI 应用入口与路由
-app/data.py                # 页面种子数据（后续由数据库取代）
+app/models.py              # SQLAlchemy 模型
+app/db.py                  # 引擎、SQLite pragma、种子数据写入
+app/repository.py          # 数据查询层
+app/data.py                # 初始种子数据（仅首次启动时写入数据库）
 app/templates/base.html    # 页面外壳：顶栏、导航、弹窗
 app/templates/views/       # 五个视图，由 htmx 换入 #viewport
 app/templates/partials/    # 可单独换入的片段（作品网格等）

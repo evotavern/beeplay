@@ -12,3 +12,6 @@ tmp/
 .venv/
 __pycache__/
 *.pyc
+beeplay.db
+beeplay.db-wal
+beeplay.db-shm

@@ -31,9 +31,3 @@ PROFILE_TABS = {
 
 CATEGORIES = ("all", "focus", "relax", "physics", "puzzle")
 
-
-def works_for(category: str) -> list[dict]:
-    """Works in a discover category; 'all' (or anything unknown) returns every work."""
-    if category not in CATEGORIES or category == "all":
-        return WORKS
-    return [work for work in WORKS if work["category"] == category]

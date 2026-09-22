@@ -1,15 +1,26 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.orm import Session
 
-from app.data import PROFILE_TABS, PROFILE_WORKS, works_for
+from app.data import PROFILE_TABS
+from app.db import get_session, init_db
+from app.repository import discover_works, profile_works
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-app = FastAPI(title="Beeplay")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
+
+
+app = FastAPI(title="Beeplay", lifespan=lifespan)
 
 app.mount("/assets", StaticFiles(directory=BASE_DIR / "assets"), name="assets")
 
@@ -29,14 +40,18 @@ def render_view(request: Request, view: str, **context) -> HTMLResponse:
     return templates.TemplateResponse(request, template, {"view": view, **context})
 
 
-def discover_context(category: str) -> dict:
-    return {"category": category, "works": works_for(category)}
+def discover_context(session: Session, category: str) -> dict:
+    return {"category": category, "works": discover_works(session, category)}
 
 
-def profile_context(tab: str) -> dict:
+def profile_context(session: Session, tab: str) -> dict:
     if tab not in PROFILE_TABS:
         tab = "works"
-    return {"tab": tab, "empty_title": PROFILE_TABS[tab], "profile_works": PROFILE_WORKS}
+    return {
+        "tab": tab,
+        "empty_title": PROFILE_TABS[tab],
+        "profile_works": profile_works(session) if tab == "works" else [],
+    }
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -45,8 +60,10 @@ def home(request: Request) -> HTMLResponse:
 
 
 @app.get("/discover", response_class=HTMLResponse)
-def discover(request: Request, category: str = "all") -> HTMLResponse:
-    return render_view(request, "discover", **discover_context(category))
+def discover(
+    request: Request, category: str = "all", session: Session = Depends(get_session)
+) -> HTMLResponse:
+    return render_view(request, "discover", **discover_context(session, category))
 
 
 @app.get("/create", response_class=HTMLResponse)
@@ -60,19 +77,25 @@ def messages(request: Request) -> HTMLResponse:
 
 
 @app.get("/profile", response_class=HTMLResponse)
-def profile(request: Request, tab: str = "works") -> HTMLResponse:
-    return render_view(request, "profile", **profile_context(tab))
+def profile(
+    request: Request, tab: str = "works", session: Session = Depends(get_session)
+) -> HTMLResponse:
+    return render_view(request, "profile", **profile_context(session, tab))
 
 
 @app.get("/partials/works", response_class=HTMLResponse)
-def works_partial(request: Request, category: str = "all") -> HTMLResponse:
+def works_partial(
+    request: Request, category: str = "all", session: Session = Depends(get_session)
+) -> HTMLResponse:
     return templates.TemplateResponse(
-        request, "partials/work_grid.html", discover_context(category)
+        request, "partials/work_grid.html", discover_context(session, category)
     )
 
 
 @app.get("/partials/profile-works", response_class=HTMLResponse)
-def profile_works_partial(request: Request, tab: str = "works") -> HTMLResponse:
+def profile_works_partial(
+    request: Request, tab: str = "works", session: Session = Depends(get_session)
+) -> HTMLResponse:
     return templates.TemplateResponse(
-        request, "partials/profile_grid.html", profile_context(tab)
+        request, "partials/profile_grid.html", profile_context(session, tab)
     )
