@@ -1052,6 +1052,13 @@
        declared later, so an earlier rule here would lose on source order. */
     body.playing { overflow: hidden; }
     body.playing .home-feed { scroll-snap-type: none; overflow-y: hidden; touch-action: none; }
+    /* Beeplay's chrome is hidden while a game runs. The game's own topbar and
+       its four-stage journey nav are the session's controls and progress
+       indicator, so ours would only duplicate and crowd them. Hiding the
+       bottom nav also removes the stray-tap route out of a running session. */
+    body.playing .topbar,
+    body.playing .bottom-nav,
+    body.playing .bottom-spacer { display: none; }
   </style>
 </head>
 <body class="mobile-preview{% if view == 'home' %} feed-mode{% endif %}"
