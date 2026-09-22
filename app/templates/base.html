@@ -1127,7 +1127,10 @@
   <!-- Persistent game host. Body-level on purpose: anything inside #viewport is
        destroyed by an htmx nav swap, which would kill a session mid-brew. -->
   <div id="gameHost" hidden>
-    <button id="gameStop" aria-label="结束试玩">×</button>
+    <!-- Pauses rather than ends: the iframe stays mounted and keeps its game
+         state, the host just hides. Ending a session outright is a separate,
+         deliberate action (switching to another game). -->
+    <button id="gameStop" aria-label="暂停并返回信息流" title="暂停并返回">×</button>
   </div>
 
   <div class="toast" id="toast" role="status"></div>
