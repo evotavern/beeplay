@@ -1108,7 +1108,16 @@
       </div>
     </header>
 
-    <main class="page" id="viewport">
+    <!-- hx-history-elt scopes history snapshots and restores to the viewport.
+         Without it htmx's history element is <body>, and a Back press restores
+         a snapshot over the whole body: app.js re-executes and registers a
+         second set of delegated listeners (every click then fires twice, so
+         like/save toggle on then off and never stick), while the first set is
+         left pointing at a detached #gameHost, #createModal and #toast. The
+         snapshot also deserializes a stale <iframe>, so the next play mounts a
+         second copy of the game beside a zombie. Restoring only what htmx owns
+         leaves the body-level hosts — the whole point of them — untouched. -->
+    <main class="page" id="viewport" hx-history-elt>
 {% include "views/" ~ view ~ ".html" %}
     </main>
 

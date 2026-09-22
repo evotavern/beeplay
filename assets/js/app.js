@@ -34,6 +34,13 @@
     window.scrollTo({ top: 0, behavior: "smooth" });
   });
 
+  // A history restore swaps #viewport without firing htmx:afterSwap, and the
+  // chrome it leaves behind belongs to the page we navigated away from — a
+  // stale nav highlight, and a missing body.feed-mode that unlocks page scroll
+  // underneath the feed. htmx restores the scroll position itself, so only the
+  // chrome needs resyncing here.
+  document.body.addEventListener("htmx:historyRestore", syncChrome);
+
   function openCreateModal() {
     modal.classList.add("open");
     document.body.style.overflow = "hidden";
@@ -280,7 +287,13 @@
   function endGame() {
     if (!session) return;
     pauseGame();
-    gameHost.innerHTML = "";
+    // Only the frames go. #gameStop is a child of the host, so clearing the
+    // host wholesale would delete the sole exit control — body.playing hides
+    // the topbar and the bottom nav, leaving a full-bleed overlay with no way
+    // out but the Escape key, which a phone does not have.
+    [].forEach.call(gameHost.querySelectorAll("iframe"), function (frame) {
+      frame.remove();
+    });
     session = null;
   }
 
@@ -326,12 +339,21 @@
 
   // The card is rebuilt on every swap, so re-find it by hash and re-anchor.
   // A paused session survives the swap because the host is outside #viewport.
-  document.body.addEventListener("htmx:afterSwap", function (event) {
-    if (event.detail.target.id !== "viewport" || !session) return;
+  function reanchorSession() {
+    if (!session) return;
     session.card = document.querySelector(
       '.game-card[data-artifact="' + session.hash + '"]'
     );
+  }
+
+  document.body.addEventListener("htmx:afterSwap", function (event) {
+    if (event.detail.target.id !== "viewport") return;
+    reanchorSession();
   });
+
+  // Back and forward rebuild the card too, and a paused session has to survive
+  // them for the same reason it survives a nav swap.
+  document.body.addEventListener("htmx:historyRestore", reanchorSession);
 
   // The exit control belongs to the host, not the card: the full-bleed
   // overlay covers .game-actions, so the card's own Ⅱ is unreachable while
