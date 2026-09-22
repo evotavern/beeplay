@@ -42,6 +42,7 @@
   document.body.addEventListener("htmx:historyRestore", syncChrome);
 
   function openCreateModal() {
+    showCreateChoices();
     modal.classList.add("open");
     document.body.style.overflow = "hidden";
   }
@@ -49,6 +50,44 @@
   function closeCreateModal() {
     modal.classList.remove("open");
     document.body.style.overflow = "";
+  }
+
+  var importGameForm = document.getElementById("importGameForm");
+  var createChoices = document.getElementById("createChoices");
+  var importGameZip = document.getElementById("importGameZip");
+  var importGameFolder = document.getElementById("importGameFolder");
+  var importDropzone = document.getElementById("importDropzone");
+  var importSubmit = importGameForm.querySelector("[type='submit']");
+  var importSelection = null;
+
+  function setCreateModalCopy(title, description) {
+    document.getElementById("createModalTitle").textContent = title;
+    document.getElementById("createModalDescription").textContent = description;
+  }
+
+  function showImportGame() {
+    createChoices.hidden = true;
+    importGameForm.hidden = false;
+    setCreateModalCopy("导入一个小游戏", "把已经做好的游戏放进你的首页游戏流。");
+  }
+
+  function showCreateChoices() {
+    importGameForm.hidden = true;
+    createChoices.hidden = false;
+    importGameForm.reset();
+    importSubmit.disabled = false;
+    importSelection = null;
+    document.getElementById("importSelection").textContent = "拖入一个 zip 游戏包";
+    document.getElementById("importStatus").textContent = "";
+    setCreateModalCopy("你想玩什么？", "选择一个入口，马上开始你的 Bee。");
+  }
+
+  function selectImport(kind, files) {
+    if (!files.length) return;
+    importSelection = { kind: kind, files: [].slice.call(files) };
+    document.getElementById("importSelection").textContent =
+      kind === "zip" ? "已选择 " + files[0].name : "已选择 " + files.length + " 个游戏文件";
+    document.getElementById("importStatus").textContent = "已就绪，加入后会出现在首页游戏流。";
   }
 
   // --- feed navigation -------------------------------------------------
@@ -192,9 +231,13 @@
   document.getElementById("closeModal").addEventListener("click", closeCreateModal);
 
   modal.addEventListener("click", function (event) {
-    if (event.target === modal) closeCreateModal();
+    if (event.target === modal) { closeCreateModal(); showCreateChoices(); return; }
     var choice = event.target.closest("[data-modal-choice]");
     if (!choice) return;
+    if (choice.dataset.modalChoice === "import") {
+      showImportGame();
+      return;
+    }
     closeCreateModal();
     // No pushState here: htmx.ajax has no source element, so it resolves
     // hx-push-url from <body>, where it is true, and pushes /create itself.
@@ -211,6 +254,72 @@
       }
       setTimeout(function () { ideaInput.focus(); }, 250);
     });
+  });
+
+  document.getElementById("importBack").addEventListener("click", showCreateChoices);
+  importDropzone.addEventListener("click", function () { importGameZip.click(); });
+  document.getElementById("chooseGameZip").addEventListener("click", function () { importGameZip.click(); });
+  document.getElementById("chooseGameFolder").addEventListener("click", function () { importGameFolder.click(); });
+  importGameZip.addEventListener("change", function () { selectImport("zip", importGameZip.files); });
+  importGameFolder.addEventListener("change", function () { selectImport("folder", importGameFolder.files); });
+  ["dragenter", "dragover"].forEach(function (type) {
+    importDropzone.addEventListener(type, function (event) {
+      event.preventDefault();
+      importDropzone.classList.add("dragging");
+    });
+  });
+  ["dragleave", "drop"].forEach(function (type) {
+    importDropzone.addEventListener(type, function (event) {
+      event.preventDefault();
+      importDropzone.classList.remove("dragging");
+    });
+  });
+  importDropzone.addEventListener("drop", function (event) {
+    var files = event.dataTransfer.files;
+    if (!files.length) return;
+    selectImport(files.length === 1 && /\.zip$/i.test(files[0].name) ? "zip" : "folder", files);
+  });
+  importGameForm.addEventListener("submit", function (event) {
+    event.preventDefault();
+    if (!importSelection) {
+      document.getElementById("importStatus").textContent = "先选择一个 zip 或 dist 文件夹。";
+      return;
+    }
+    importSubmit.disabled = true;
+    var data = new FormData();
+    data.append("title", document.getElementById("importGameTitle").value.trim());
+    if (importSelection.kind === "zip") {
+      data.append("bundle", importSelection.files[0]);
+    } else {
+      importSelection.files.forEach(function (file) {
+        data.append("files", file);
+        data.append("paths", file.webkitRelativePath || file.name);
+      });
+    }
+    document.getElementById("importStatus").textContent = "正在加入游戏流…";
+    fetch("/api/import-game", { method: "POST", body: data })
+      .then(function (response) {
+        return response.json().catch(function () {
+          throw new Error(response.ok ? "导入失败" : "服务器拒绝了上传，请检查文件大小后重试");
+        }).then(function (result) {
+          if (!response.ok) throw new Error(result.detail || "导入失败");
+          return result;
+        });
+      })
+      .then(function (game) {
+        closeCreateModal();
+        showCreateChoices();
+        return htmx.ajax("GET", "/", { target: "#viewport", swap: "innerHTML" }).then(function () {
+          history.pushState({}, "", "/");
+          var card = document.querySelector('.game-card[data-artifact="' + game.artifact + '"]');
+          if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+          showToast("“" + game.title + "” 已加入游戏流");
+        });
+      })
+      .catch(function (error) {
+        document.getElementById("importStatus").textContent = error.message;
+      })
+      .finally(function () { importSubmit.disabled = false; });
   });
 
   // --- keyboard --------------------------------------------------------

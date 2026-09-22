@@ -35,3 +35,27 @@ def feed_games(session: Session, games_dir: Path) -> list[Work]:
         for game in games
         if (games_dir / game.artifact_hash / "index.html").is_file()
     ]
+
+
+def register_imported_game(
+    session: Session, *, artifact_hash: str, title: str, author: str = "Jastin Anna"
+) -> Work:
+    """Add an imported artifact to the existing swipe feed."""
+    last_position = session.scalar(
+        select(Work.position).where(Work.collection == "feed").order_by(Work.position.desc())
+    )
+    game = Work(
+        artifact_hash=artifact_hash,
+        title=title,
+        author=author,
+        category="relax",
+        emoji="🎮",
+        art="art-one",
+        views="0",
+        likes="0",
+        collection="feed",
+        position=(last_position if last_position is not None else -1) + 1,
+    )
+    session.add(game)
+    session.commit()
+    return game
