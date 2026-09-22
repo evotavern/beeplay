@@ -1,0 +1,23 @@
+"""The single profile avatar, recolored per identity.
+
+The prototype inlined one SVG data URI in the templates. Eight testers need to
+tell each other apart at a glance, and eight PNGs would be eight more files to
+deploy, so the same drawing is re-tinted instead.
+"""
+
+_TEMPLATE = (
+    "data:image/svg+xml,"
+    "%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120'%3E"
+    "%3Crect width='120' height='120' rx='36' fill='%23{fill}'/%3E"
+    "%3Ccircle cx='61' cy='47' r='24' fill='%23171b1a'/%3E"
+    "%3Cpath d='M25 108c5-28 22-43 37-43s32 15 37 43' fill='%23{accent}'/%3E"
+    "%3Ccircle cx='53' cy='43' r='4' fill='%23fff'/%3E%3C/svg%3E"
+)
+
+# The prototype's orange shirt, kept for every identity so the recolor reads as
+# the same character rather than eight unrelated drawings.
+ACCENT = "f27c45"
+
+
+def avatar(fill: str = "d8d6ff") -> str:
+    return _TEMPLATE.format(fill=fill, accent=ACCENT)

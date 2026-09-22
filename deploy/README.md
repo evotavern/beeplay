@@ -53,6 +53,20 @@ The app seeds its own SQLite database at `/var/lib/beeplay/beeplay.db` on
 first startup. The handoff game is listed in that seed data, and is rendered
 only after its `index.html` exists under `/var/lib/beeplay/games`.
 
+Startup is also what migrates a database that predates tester identities: it
+adds `works.user_id` if the column is missing, inserts any of the eight
+identities that are absent, and hands the three pre-existing profile works to
+the first of them. All three steps are guarded per row, so restarting is safe
+and there is no manual step to run after a deploy.
+
+Claims release themselves two hours after a tester's last request. To clear
+them all before a demo round:
+
+```bash
+sudo -u beeplay sqlite3 /var/lib/beeplay/beeplay.db \
+  "UPDATE users SET last_seen_at = NULL, claim_token = NULL;"
+```
+
 ## Verify
 
 ```bash
