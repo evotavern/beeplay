@@ -1,0 +1,12 @@
+{
+  "name": "beeplay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "蜂玩 Beeplay mobile-first interactive game feed prototype",
+  "scripts": {
+    "icons": "node tools/export-icons.cjs"
+  },
+  "devDependencies": {
+    "sharp": "^0.33.5"
+  }
+}

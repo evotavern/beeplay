@@ -1,0 +1,92 @@
+{
+  "beeplay-logo": {
+    "file": "beeplay-logo.png",
+    "width": 512,
+    "height": 512,
+    "background": "transparent"
+  },
+  "beeplay-mascot": {
+    "file": "beeplay-mascot.png",
+    "width": 640,
+    "height": 640,
+    "background": "transparent"
+  },
+  "home": {
+    "file": "home.png",
+    "width": 128,
+    "height": 128,
+    "background": "transparent"
+  },
+  "discover": {
+    "file": "discover.png",
+    "width": 128,
+    "height": 128,
+    "background": "transparent"
+  },
+  "create": {
+    "file": "create.png",
+    "width": 128,
+    "height": 128,
+    "background": "transparent"
+  },
+  "messages": {
+    "file": "messages.png",
+    "width": 128,
+    "height": 128,
+    "background": "transparent"
+  },
+  "profile": {
+    "file": "profile.png",
+    "width": 128,
+    "height": 128,
+    "background": "transparent"
+  },
+  "notification": {
+    "file": "notification.png",
+    "width": 128,
+    "height": 128,
+    "background": "transparent"
+  },
+  "play": {
+    "file": "play.png",
+    "width": 128,
+    "height": 128,
+    "background": "transparent"
+  },
+  "like": {
+    "file": "like.png",
+    "width": 128,
+    "height": 128,
+    "background": "transparent"
+  },
+  "save": {
+    "file": "save.png",
+    "width": 128,
+    "height": 128,
+    "background": "transparent"
+  },
+  "share": {
+    "file": "share.png",
+    "width": 128,
+    "height": 128,
+    "background": "transparent"
+  },
+  "search": {
+    "file": "search.png",
+    "width": 128,
+    "height": 128,
+    "background": "transparent"
+  },
+  "close": {
+    "file": "close.png",
+    "width": 128,
+    "height": 128,
+    "background": "transparent"
+  },
+  "more": {
+    "file": "more.png",
+    "width": 128,
+    "height": 128,
+    "background": "transparent"
+  }
+}
