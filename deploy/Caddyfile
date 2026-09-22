@@ -23,6 +23,14 @@ beeplay.top {
 		header Cache-Control "no-cache"
 	}
 
+	# Unpacked games, served straight from state rather than through uvicorn.
+	# Content-addressed by hash, so a given path's bytes never change.
+	handle_path /games/* {
+		root * /var/lib/beeplay/games
+		file_server
+		header Cache-Control "public, max-age=31536000, immutable"
+	}
+
 	handle {
 		reverse_proxy 127.0.0.1:8000
 	}

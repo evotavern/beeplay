@@ -15,6 +15,8 @@ WorkingDirectory=/srv/beeplay
 # database lives — the app directory itself is read-only under ProtectSystem.
 StateDirectory=beeplay
 Environment=BEEPLAY_DB_PATH=/var/lib/beeplay/beeplay.db
+# Unpacked games, for the same reason: /srv/beeplay is read-only.
+Environment=BEEPLAY_GAMES_DIR=/var/lib/beeplay/games
 
 # --proxy-headers makes uvicorn trust X-Forwarded-Proto from Caddy, so the app
 # knows requests arrived over https; the trust is limited to localhost.

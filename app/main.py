@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -13,6 +14,16 @@ from app.repository import discover_works, profile_works
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Unpacked games, one directory per artifact hash. Deployed, this has to live
+# in state: ProtectSystem=strict makes the app directory read-only, so the
+# mkdir below would fail at startup against BASE_DIR. Same convention as
+# BEEPLAY_DB_PATH.
+GAMES_DIR = Path(os.environ.get("BEEPLAY_GAMES_DIR", BASE_DIR / "games"))
+# Created at import, not in lifespan: app.mount() constructs StaticFiles
+# immediately and it raises on a missing directory, which happens before any
+# lifespan hook runs. games/ is gitignored, so a fresh checkout has none.
+GAMES_DIR.mkdir(parents=True, exist_ok=True)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -23,6 +34,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Beeplay", lifespan=lifespan)
 
 app.mount("/assets", StaticFiles(directory=BASE_DIR / "assets"), name="assets")
+
+# Development convenience: in production Caddy serves /games/* straight from
+# disk, so game files never go through uvicorn's threadpool.
+app.mount("/games", StaticFiles(directory=GAMES_DIR), name="games")
 
 templates = Jinja2Templates(directory=BASE_DIR / "app" / "templates")
 # Preserve the template's trailing newline; Starlette 1.6 no longer
