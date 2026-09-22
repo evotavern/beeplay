@@ -46,4 +46,3 @@ PROFILE_TABS = {
 }
 
 CATEGORIES = ("all", "focus", "relax", "physics", "puzzle")
-

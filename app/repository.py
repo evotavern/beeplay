@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -21,10 +23,15 @@ def profile_works(session: Session) -> list[Work]:
     )
 
 
-def first_playable(session: Session) -> Work | None:
-    """The first feed game with an artifact on disk, or None if nothing is playable."""
-    return session.scalars(
+def feed_games(session: Session, games_dir: Path) -> list[Work]:
+    """Feed records whose static artifact is available to serve."""
+    games = session.scalars(
         select(Work)
         .where(Work.collection == "feed", Work.artifact_hash.is_not(None))
         .order_by(Work.position)
-    ).first()
+    )
+    return [
+        game
+        for game in games
+        if (games_dir / game.artifact_hash / "index.html").is_file()
+    ]

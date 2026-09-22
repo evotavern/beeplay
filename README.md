@@ -48,6 +48,13 @@ assets/icons/              # Logo、吉祥物和功能图标
 tools/export-icons.cjs     # 图标导出脚本
 ```
 
+## 游戏流
+
+首页只展示数据库 `works` 表中 `collection = 'feed'`、且游戏文件实际存在的
+记录。静态游戏文件位于 `BEEPLAY_GAMES_DIR/<artifact_hash>/index.html`：本地
+默认是 `./games`，部署时是 `/var/lib/beeplay/games`。因此一条信息流记录只有
+在对应的游戏文件存在时才会显示并可启动。
+
 ## 团队协作约定
 
 - `main`：可发布或演示的稳定版本

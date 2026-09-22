@@ -783,6 +783,15 @@
     body.mobile-preview .game-card.game-lime { background: #c9e89b; }
     body.mobile-preview .game-card.game-lavender { background: #d6d3ff; }
     body.mobile-preview .game-card.game-orange { background: #ffd29a; }
+    body.mobile-preview .feed-empty {
+      display: grid;
+      min-height: 100%;
+      place-items: center;
+      padding: 24px;
+      color: var(--muted);
+      font-weight: 800;
+      text-align: center;
+    }
     body.mobile-preview .game-card-head {
       position: absolute;
       z-index: 3;
@@ -872,6 +881,13 @@
       content: "PLAY";
       font-size: 11px;
       letter-spacing: 0.08em;
+    }
+    body.mobile-preview .scene-piece.emoji {
+      left: 32%;
+      top: 25%;
+      font-size: 128px;
+      line-height: 1;
+      animation: gameFloat 3.5s ease-in-out infinite;
     }
     body.mobile-preview .scene-piece.keyboard {
       left: 13%;
