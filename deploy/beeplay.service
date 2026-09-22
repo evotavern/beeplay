@@ -1,0 +1,45 @@
+# /etc/systemd/system/beeplay.service
+[Unit]
+Description=Beeplay FastAPI application
+Documentation=https://beeplay.top
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=beeplay
+Group=beeplay
+WorkingDirectory=/srv/beeplay
+
+# StateDirectory creates and owns /var/lib/beeplay, which is where the SQLite
+# database lives — the app directory itself is read-only under ProtectSystem.
+StateDirectory=beeplay
+Environment=BEEPLAY_DB_PATH=/var/lib/beeplay/beeplay.db
+
+# --proxy-headers makes uvicorn trust X-Forwarded-Proto from Caddy, so the app
+# knows requests arrived over https; the trust is limited to localhost.
+ExecStart=/srv/beeplay/.venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --proxy-headers \
+    --forwarded-allow-ips 127.0.0.1
+
+Restart=on-failure
+RestartSec=2
+
+# Hardening. ReadWritePaths is not needed: StateDirectory is already writable.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

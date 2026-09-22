@@ -1,3 +1,4 @@
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -8,7 +9,9 @@ from app.data import PROFILE_WORKS, WORKS
 from app.models import Base, Work
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = BASE_DIR / "beeplay.db"
+# Deployed, the app directory is read-only and state belongs in
+# /var/lib/beeplay; locally it just sits next to the code.
+DB_PATH = Path(os.environ.get("BEEPLAY_DB_PATH", BASE_DIR / "beeplay.db"))
 
 engine = create_engine(
     f"sqlite:///{DB_PATH}",
