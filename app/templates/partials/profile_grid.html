@@ -1,0 +1,7 @@
+{% from "macros.html" import work_card %}
+{%- if empty_title %}
+<div class="empty-state"><div><div style="font-size: 56px;">✦</div><h3>{{ empty_title }}</h3><p>去探索一些新的 Bee，让这里慢慢长出来。</p></div></div>
+{%- else %}
+{% for work in profile_works %}{{ work_card(work) }}
+{% endfor %}
+{%- endif %}

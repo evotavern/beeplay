@@ -1,0 +1,39 @@
+      <section class="view active" id="discoverView" data-view="discover">
+        <div class="view-header">
+          <div><h1>探索好玩的<br />新作品。</h1><p>把别人的灵感变成你的下一次开始。先试玩，再收藏，也可以一键 Remix。</p></div>
+          <label class="search-box">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+            <input id="searchInput" type="search" placeholder="寻找作品、作者或关键词" />
+          </label>
+        </div>
+        <div class="discover-layout">
+          <article class="feature-card">
+            <div class="feature-content">
+              <span class="chip">HOT · 本周热门</span>
+              <div>
+                <h2 class="feature-title">蜂巢里的<br />小小冒险</h2>
+                <div class="feature-meta">
+                  <img class="mini-avatar" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Ccircle cx='40' cy='40' r='40' fill='%23b5d65a'/%3E%3Cpath d='M22 62c3-15 12-23 18-23s15 8 18 23' fill='%23171b1a'/%3E%3Ccircle cx='40' cy='28' r='13' fill='%23f8fbe8'/%3E%3C/svg%3E" alt="" />
+                  <span>Bee Lab · 互动故事</span>
+                </div>
+              </div>
+              <div class="feature-bottom"><div class="feature-stats"><span>◉ 8.4K</span><span>♥ 2.1K</span><span>▣ 86</span></div><button class="feature-cta" data-toast="正在打开作品">立即试玩</button></div>
+            </div>
+          </article>
+          <aside class="promo-card">
+            <div><span class="eyebrow"><i></i> Beeplay picks</span><h2>今天不必效率很高，先玩出一点灵感。</h2><p>适合短暂休息、脑洞热身和把一件小事做完的精选作品。</p></div>
+            <button class="secondary-button" data-toast="已切换精选推荐">换一组推荐 ↗</button>
+          </aside>
+        </div>
+        <div class="category-section">
+          <div class="section-heading"><div><h2>精选推荐</h2><p>只有最出色的 Bee 才能登场。</p></div><button data-toast="已打开全部推荐">查看全部 →</button></div>
+          <div class="category-row">
+            <button class="category-pill{% if category == 'all' %} active{% endif %}" data-category="all" hx-get="/partials/works?category=all" hx-target="#workGrid" hx-push-url="false">全部作品</button>
+            <button class="category-pill{% if category == 'focus' %} active{% endif %}" data-category="focus" hx-get="/partials/works?category=focus" hx-target="#workGrid" hx-push-url="false">专注一下</button>
+            <button class="category-pill{% if category == 'relax' %} active{% endif %}" data-category="relax" hx-get="/partials/works?category=relax" hx-target="#workGrid" hx-push-url="false">放松一下</button>
+            <button class="category-pill{% if category == 'physics' %} active{% endif %}" data-category="physics" hx-get="/partials/works?category=physics" hx-target="#workGrid" hx-push-url="false">物理乐趣</button>
+            <button class="category-pill{% if category == 'puzzle' %} active{% endif %}" data-category="puzzle" hx-get="/partials/works?category=puzzle" hx-target="#workGrid" hx-push-url="false">益智玩乐</button>
+          </div>
+          <div class="work-grid" id="workGrid">{% include "partials/work_grid.html" %}</div>
+        </div>
+      </section>

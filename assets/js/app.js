@@ -1,0 +1,219 @@
+(function () {
+  "use strict";
+
+  var modal = document.getElementById("createModal");
+  var toast = document.getElementById("toast");
+  var toastTimer;
+  var feedWheelLocked = false;
+
+  function showToast(message) {
+    toast.textContent = message;
+    toast.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { toast.classList.remove("show"); }, 2200);
+  }
+
+  // The swapped-in section is the only .view in the DOM, so it *is* the state.
+  function currentView() {
+    var view = document.querySelector("#viewport .view");
+    return view ? view.dataset.view : "home";
+  }
+
+  // Nav and body live outside #viewport, so htmx never touches them.
+  function syncChrome() {
+    var view = currentView();
+    document.querySelectorAll(".nav-item, .desktop-nav button").forEach(function (nav) {
+      nav.classList.toggle("active", nav.dataset.viewTarget === view);
+    });
+    document.body.classList.toggle("feed-mode", view === "home");
+  }
+
+  document.body.addEventListener("htmx:afterSwap", function (event) {
+    if (event.detail.target.id !== "viewport") return;
+    syncChrome();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+
+  function openCreateModal() {
+    modal.classList.add("open");
+    document.body.style.overflow = "hidden";
+  }
+
+  function closeCreateModal() {
+    modal.classList.remove("open");
+    document.body.style.overflow = "";
+  }
+
+  // --- feed navigation -------------------------------------------------
+  // Re-queried per call: the feed is destroyed and rebuilt on every swap.
+  function moveFeed(direction) {
+    var feed = document.getElementById("homeFeed");
+    var cards = [].slice.call(document.querySelectorAll(".game-card"));
+    if (!feed || !cards.length) return;
+    var currentIndex = Math.max(0, cards.findIndex(function (card) {
+      return Math.abs(card.getBoundingClientRect().top - feed.getBoundingClientRect().top) < 40;
+    }));
+    var nextIndex = Math.min(cards.length - 1, Math.max(0, currentIndex + direction));
+    cards[nextIndex].scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  document.addEventListener("wheel", function (event) {
+    if (!event.target.closest || !event.target.closest(".home-feed")) return;
+    if (Math.abs(event.deltaY) < 8 || feedWheelLocked) return;
+    event.preventDefault();
+    feedWheelLocked = true;
+    moveFeed(event.deltaY > 0 ? 1 : -1);
+    setTimeout(function () { feedWheelLocked = false; }, 520);
+  }, { passive: false });
+
+  // --- delegated clicks ------------------------------------------------
+  // Everything below is delegated from document so it survives htmx swaps.
+  document.addEventListener("click", function (event) {
+    var target = event.target;
+
+    var gameAction = target.closest("[data-game-action]");
+    if (gameAction) {
+      var gameCard = gameAction.closest(".game-card");
+      var title = (gameCard && gameCard.dataset.gameTitle) || "这个游戏";
+      var action = gameAction.dataset.gameAction;
+      if (action === "play") {
+        gameAction.classList.toggle("active");
+        var playing = gameAction.classList.contains("active");
+        gameAction.textContent = playing ? "Ⅱ" : "▶";
+        showToast(playing ? "正在试玩 " + title : "已暂停 " + title);
+      }
+      if (action === "like") {
+        gameAction.classList.toggle("active");
+        showToast(gameAction.classList.contains("active") ? "已喜欢 " + title : "已取消喜欢");
+      }
+      if (action === "save") {
+        gameAction.classList.toggle("active");
+        showToast(gameAction.classList.contains("active") ? "已收藏 " + title : "已取消收藏");
+      }
+      if (action === "share") showToast("分享卡片已准备好：" + title);
+      return;
+    }
+
+    if (target.closest("[data-action='create']")) {
+      openCreateModal();
+      return;
+    }
+
+    // htmx swaps the grid; the pill row stays put, so mark the active pill here.
+    var pill = target.closest(".category-pill");
+    if (pill) {
+      document.querySelectorAll(".category-pill").forEach(function (item) {
+        item.classList.remove("active");
+      });
+      pill.classList.add("active");
+      return;
+    }
+
+    var profileTab = target.closest("[data-profile-tab]");
+    if (profileTab) {
+      document.querySelectorAll("[data-profile-tab]").forEach(function (item) {
+        item.classList.remove("active");
+      });
+      profileTab.classList.add("active");
+      return;
+    }
+
+    var taskCheck = target.closest(".task-check");
+    if (taskCheck) {
+      var row = taskCheck.closest(".task-row");
+      row.classList.toggle("complete");
+      var complete = row.classList.contains("complete");
+      taskCheck.textContent = complete ? "✓" : "○";
+      showToast(complete ? "任务完成，蜂蜜积分 +10" : "已取消完成状态");
+      return;
+    }
+
+    var fill = target.closest("[data-fill]");
+    if (fill) {
+      var ideaInput = document.getElementById("ideaInput");
+      ideaInput.value = fill.dataset.fill;
+      ideaInput.focus();
+      return;
+    }
+
+    var tool = target.closest("[data-tool]");
+    if (tool) {
+      tool.classList.toggle("active");
+      return;
+    }
+
+    if (target.closest("#ideaSubmit")) {
+      var input = document.getElementById("ideaInput");
+      if (!input.value.trim()) {
+        input.focus();
+        showToast("先写下一句想法吧");
+        return;
+      }
+      showToast("Bee 正在把你的想法变成一个可玩的版本…");
+      setTimeout(function () { showToast("初版完成，马上可以开始试玩"); }, 1700);
+      return;
+    }
+
+    if (target.closest("#enableNotifications")) {
+      if ("Notification" in window && Notification.permission === "default") {
+        Notification.requestPermission().then(function (permission) {
+          showToast(permission === "granted" ? "通知已开启" : "你可以稍后在浏览器设置中开启");
+        });
+      } else {
+        showToast("通知偏好已更新");
+      }
+      return;
+    }
+
+    if (target.closest("#creditPill")) {
+      showToast("你的蜂蜜积分余额：1,000");
+      return;
+    }
+
+    var toastTarget = target.closest("[data-toast]");
+    if (toastTarget) showToast(toastTarget.dataset.toast);
+  });
+
+  // --- discover search -------------------------------------------------
+  // Filters the cards htmx rendered; input bubbles, so delegation works.
+  document.addEventListener("input", function (event) {
+    if (event.target.id !== "searchInput") return;
+    var keyword = event.target.value.trim().toLowerCase();
+    document.querySelectorAll("#workGrid .work-card").forEach(function (card) {
+      card.style.display = !keyword || card.dataset.workTitle.indexOf(keyword) !== -1 ? "" : "none";
+    });
+  });
+
+  // --- create modal ----------------------------------------------------
+  document.getElementById("closeModal").addEventListener("click", closeCreateModal);
+
+  modal.addEventListener("click", function (event) {
+    if (event.target === modal) closeCreateModal();
+    var choice = event.target.closest("[data-modal-choice]");
+    if (!choice) return;
+    closeCreateModal();
+    htmx.ajax("GET", "/create", { target: "#viewport", swap: "innerHTML" }).then(function () {
+      history.pushState({}, "", "/create");
+      var ideaInput = document.getElementById("ideaInput");
+      if (!ideaInput) return;
+      if (choice.dataset.modalChoice === "habit") {
+        ideaInput.value = "帮我做一个每天都想打开的习惯计划";
+      }
+      if (choice.dataset.modalChoice === "remix") {
+        ideaInput.value = "我想 Remix 一个轻松、有一点惊喜的互动作品";
+      }
+      setTimeout(function () { ideaInput.focus(); }, 250);
+    });
+  });
+
+  // --- keyboard --------------------------------------------------------
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && modal.classList.contains("open")) closeCreateModal();
+    if (modal.classList.contains("open")) return;
+    if (currentView() !== "home") return;
+    if (event.key === "ArrowDown") { event.preventDefault(); moveFeed(1); }
+    if (event.key === "ArrowUp") { event.preventDefault(); moveFeed(-1); }
+  });
+
+  syncChrome();
+})();

@@ -1040,222 +1040,39 @@
     }
   </style>
 </head>
-<body class="mobile-preview feed-mode">
+<body class="mobile-preview{% if view == 'home' %} feed-mode{% endif %}"
+      hx-target="#viewport" hx-swap="innerHTML" hx-push-url="true">
   <div class="app-shell">
     <header class="topbar">
-      <button class="brand" data-view-target="home" aria-label="回到首页">
+      <button class="brand" data-view-target="home" hx-get="/" aria-label="回到首页">
         <span class="brand-mark" aria-hidden="true">
           <img src="assets/icons/beeplay-logo.png" alt="" />
         </span>
         <span class="brand-copy"><strong>beeplay</strong><span>蜂玩 · make it playful</span></span>
       </button>
       <nav class="desktop-nav" aria-label="桌面主导航">
-        <button class="active" data-view-target="home">首页</button>
-        <button data-view-target="discover">探索</button>
-        <button data-view-target="create">创建</button>
-        <button data-view-target="messages">消息</button>
-        <button data-view-target="profile">个人</button>
+        <button class="nav-link{% if view == 'home' %} active{% endif %}" data-view-target="home" hx-get="/">首页</button>
+        <button class="nav-link{% if view == 'discover' %} active{% endif %}" data-view-target="discover" hx-get="/discover">探索</button>
+        <button class="nav-link{% if view == 'create' %} active{% endif %}" data-view-target="create" hx-get="/create">创建</button>
+        <button class="nav-link{% if view == 'messages' %} active{% endif %}" data-view-target="messages" hx-get="/messages">消息</button>
+        <button class="nav-link{% if view == 'profile' %} active{% endif %}" data-view-target="profile" hx-get="/profile">个人</button>
       </nav>
       <button class="desktop-create" data-action="create" aria-label="开始创建"><span>+</span><span>开始创建</span></button>
       <div class="topbar-actions">
         <button class="credit-pill" id="creditPill" aria-label="查看蜂蜜积分"><span class="credit-dot">✦</span><span>1,000</span></button>
-        <button class="icon-button" id="notificationButton" aria-label="查看消息">
+        <button class="icon-button" id="notificationButton" data-view-target="messages" hx-get="/messages" aria-label="查看消息">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9Z"/><path d="M10 21h4"/>
           </svg>
         </button>
-        <button class="avatar-button" data-view-target="profile" aria-label="查看个人主页">
+        <button class="avatar-button" data-view-target="profile" hx-get="/profile" aria-label="查看个人主页">
           <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120'%3E%3Crect width='120' height='120' rx='36' fill='%23d8d6ff'/%3E%3Ccircle cx='61' cy='47' r='24' fill='%23171b1a'/%3E%3Cpath d='M25 108c5-28 22-43 37-43s32 15 37 43' fill='%23f27c45'/%3E%3Ccircle cx='53' cy='43' r='4' fill='%23fff'/%3E%3C/svg%3E" alt="Jastin Anna" />
         </button>
       </div>
     </header>
 
-    <main class="page">
-      <section class="view active" id="homeView" data-view="home">
-        <div class="home-feed" id="homeFeed" aria-label="可上下滑动的游戏流">
-          <article class="game-card game-lime" data-game-title="Jungle Escape">
-            <div class="game-card-head"><span class="game-badge">FOR YOU · 01</span><button class="game-more" data-toast="更多游戏选项已打开" aria-label="更多选项">⋯</button></div>
-            <div class="game-scene" aria-hidden="true">
-              <span class="scene-sun"></span><span class="scene-ground"></span><span class="scene-piece tree"></span><span class="scene-piece ball"></span>
-            </div>
-            <div class="game-copy"><h2>Jungle Escape</h2><p>滚动、跳跃，躲开这片会移动的绿色丛林。</p><div class="game-author">Mia Chen · 互动小游戏</div></div>
-            <div class="game-actions">
-              <button class="game-action play-game" data-game-action="play" aria-label="试玩 Jungle Escape">▶</button>
-              <button class="game-action" data-game-action="like" aria-label="喜欢 Jungle Escape">♥<small>1.2K</small></button>
-              <button class="game-action" data-game-action="save" aria-label="收藏 Jungle Escape">▣</button>
-              <button class="game-action" data-game-action="share" aria-label="分享 Jungle Escape">↗</button>
-            </div>
-          </article>
-
-          <article class="game-card game-lavender" data-game-title="Color Keyboard">
-            <div class="game-card-head"><span class="game-badge">TRENDING · 02</span><button class="game-more" data-toast="更多游戏选项已打开" aria-label="更多选项">⋯</button></div>
-            <div class="game-scene" aria-hidden="true"><span class="scene-sun"></span><span class="scene-piece keyboard"></span></div>
-            <div class="game-copy"><h2>Color Keyboard</h2><p>跟着颜色按下正确的键，让节奏一点点亮起来。</p><div class="game-author">Scarlett · 节奏互动</div></div>
-            <div class="game-actions">
-              <button class="game-action play-game" data-game-action="play" aria-label="试玩 Color Keyboard">▶</button>
-              <button class="game-action" data-game-action="like" aria-label="喜欢 Color Keyboard">♥<small>3.4K</small></button>
-              <button class="game-action" data-game-action="save" aria-label="收藏 Color Keyboard">▣</button>
-              <button class="game-action" data-game-action="share" aria-label="分享 Color Keyboard">↗</button>
-            </div>
-          </article>
-
-          <article class="game-card game-orange" data-game-title="Bounce Lab">
-            <div class="game-card-head"><span class="game-badge">NEW BEE · 03</span><button class="game-more" data-toast="更多游戏选项已打开" aria-label="更多选项">⋯</button></div>
-            <div class="game-scene" aria-hidden="true"><span class="scene-sun"></span><span class="scene-ground"></span><span class="scene-piece orbit"></span></div>
-            <div class="game-copy"><h2>Bounce Lab</h2><p>调整角度和速度，看看小球会弹到哪里。</p><div class="game-author">oxo studio · 物理玩具</div></div>
-            <div class="game-actions">
-              <button class="game-action play-game" data-game-action="play" aria-label="试玩 Bounce Lab">▶</button>
-              <button class="game-action" data-game-action="like" aria-label="喜欢 Bounce Lab">♥<small>5.1K</small></button>
-              <button class="game-action" data-game-action="save" aria-label="收藏 Bounce Lab">▣</button>
-              <button class="game-action" data-game-action="share" aria-label="分享 Bounce Lab">↗</button>
-            </div>
-          </article>
-
-          <article class="game-card game-lavender" data-game-title="Swab Logic">
-            <div class="game-card-head"><span class="game-badge">PUZZLE · 04</span><button class="game-more" data-toast="更多游戏选项已打开" aria-label="更多选项">⋯</button></div>
-            <div class="game-scene" aria-hidden="true"><span class="scene-sun"></span><span class="scene-piece ball" style="left: 35%; top: 36%; background: var(--ink);"></span><span class="scene-piece ball" style="left: 57%; top: 47%; width: 56px; background: var(--lime);"></span></div>
-            <div class="game-copy"><h2>Swab Logic</h2><p>只移动一根火柴，让数字变成另一个答案。</p><div class="game-author">Mia · 益智挑战</div></div>
-            <div class="game-actions">
-              <button class="game-action play-game" data-game-action="play" aria-label="试玩 Swab Logic">▶</button>
-              <button class="game-action" data-game-action="like" aria-label="喜欢 Swab Logic">♥<small>2.6K</small></button>
-              <button class="game-action" data-game-action="save" aria-label="收藏 Swab Logic">▣</button>
-              <button class="game-action" data-game-action="share" aria-label="分享 Swab Logic">↗</button>
-            </div>
-          </article>
-
-          <article class="game-card game-lime" data-game-title="Tiny Weather">
-            <div class="game-card-head"><span class="game-badge">LAST ONE · 05</span><button class="game-more" data-toast="更多游戏选项已打开" aria-label="更多选项">⋯</button></div>
-            <div class="game-scene" aria-hidden="true"><span class="scene-sun"></span><span class="scene-ground"></span><span class="scene-piece tree" style="left: 67%; bottom: 29%; transform: scale(0.8);"></span><span class="scene-piece ball" style="left: 32%; top: 31%; width: 112px; height: 70px; border-radius: 50%; background: var(--white);"></span></div>
-            <div class="game-copy"><h2>Tiny Weather</h2><p>拖动云朵，给今天的天气加上一点心情。</p><div class="game-author">Bee Lab · 轻量工具</div></div>
-            <div class="game-actions">
-              <button class="game-action play-game" data-game-action="play" aria-label="试玩 Tiny Weather">▶</button>
-              <button class="game-action" data-game-action="like" aria-label="喜欢 Tiny Weather">♥<small>1.8K</small></button>
-              <button class="game-action" data-game-action="save" aria-label="收藏 Tiny Weather">▣</button>
-              <button class="game-action" data-game-action="share" aria-label="分享 Tiny Weather">↗</button>
-            </div>
-          </article>
-        </div>
-      </section>
-
-      <section class="view" id="discoverView" data-view="discover">
-        <div class="view-header">
-          <div><h1>探索好玩的<br />新作品。</h1><p>把别人的灵感变成你的下一次开始。先试玩，再收藏，也可以一键 Remix。</p></div>
-          <label class="search-box">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
-            <input id="searchInput" type="search" placeholder="寻找作品、作者或关键词" />
-          </label>
-        </div>
-        <div class="discover-layout">
-          <article class="feature-card">
-            <div class="feature-content">
-              <span class="chip">HOT · 本周热门</span>
-              <div>
-                <h2 class="feature-title">蜂巢里的<br />小小冒险</h2>
-                <div class="feature-meta">
-                  <img class="mini-avatar" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Ccircle cx='40' cy='40' r='40' fill='%23b5d65a'/%3E%3Cpath d='M22 62c3-15 12-23 18-23s15 8 18 23' fill='%23171b1a'/%3E%3Ccircle cx='40' cy='28' r='13' fill='%23f8fbe8'/%3E%3C/svg%3E" alt="" />
-                  <span>Bee Lab · 互动故事</span>
-                </div>
-              </div>
-              <div class="feature-bottom"><div class="feature-stats"><span>◉ 8.4K</span><span>♥ 2.1K</span><span>▣ 86</span></div><button class="feature-cta" data-toast="正在打开作品">立即试玩</button></div>
-            </div>
-          </article>
-          <aside class="promo-card">
-            <div><span class="eyebrow"><i></i> Beeplay picks</span><h2>今天不必效率很高，先玩出一点灵感。</h2><p>适合短暂休息、脑洞热身和把一件小事做完的精选作品。</p></div>
-            <button class="secondary-button" data-toast="已切换精选推荐">换一组推荐 ↗</button>
-          </aside>
-        </div>
-        <div class="category-section">
-          <div class="section-heading"><div><h2>精选推荐</h2><p>只有最出色的 Bee 才能登场。</p></div><button data-toast="已打开全部推荐">查看全部 →</button></div>
-          <div class="category-row">
-            <button class="category-pill active" data-category="all">全部作品</button>
-            <button class="category-pill" data-category="focus">专注一下</button>
-            <button class="category-pill" data-category="relax">放松一下</button>
-            <button class="category-pill" data-category="physics">物理乐趣</button>
-            <button class="category-pill" data-category="puzzle">益智玩乐</button>
-          </div>
-          <div class="work-grid" id="workGrid"></div>
-        </div>
-      </section>
-
-      <section class="view" id="createView" data-view="create">
-        <div class="create-layout">
-          <div class="create-panel">
-            <div class="eyebrow"><i></i> Create a little magic</div>
-            <h1>说出一个想法，蜂玩帮你把它做出来。</h1>
-            <p>可以是一个小工具、一个互动游戏、一套习惯计划，或者只是一个你想每天看见的画面。先写下来，剩下的交给 Bee。</p>
-            <div class="idea-box">
-              <textarea id="ideaInput" placeholder="输入你的想法，开始建立……"></textarea>
-              <div class="idea-bottom">
-                <div class="idea-tools">
-                  <button class="tool-button" data-tool="inspiration" data-toast="已填入一个灵感提示" aria-label="灵感提示">✦</button>
-                  <button class="tool-button" data-tool="voice" data-toast="语音输入已开启" aria-label="语音输入">⌕</button>
-                  <button class="tool-button" data-tool="image" data-toast="图片素材入口已打开" aria-label="添加图片">▧</button>
-                </div>
-                <button class="idea-submit" id="ideaSubmit" aria-label="开始生成">→</button>
-              </div>
-            </div>
-            <div class="tool-strip">
-              <button class="tool-chip" data-tool="image" data-toast="图片素材入口已打开">▧ 图片</button>
-              <button class="tool-chip" data-tool="sound" data-toast="音效素材入口已打开">♫ 音效</button>
-              <button class="tool-chip" data-tool="skills" data-toast="Skills 面板已打开">✚ Skills</button>
-              <button class="tool-chip" data-tool="memes" data-toast="Memes 素材入口已打开">☻ Memes</button>
-            </div>
-            <div class="section-heading" style="margin-top: 30px;"><div><h2>需要灵感？</h2><p>从一个小而具体的愿望开始。</p></div><button data-toast="已换一条灵感">换一条 ↗</button></div>
-            <div class="inspiration-list" style="margin-top: 13px;">
-              <div class="inspiration-card"><div class="inspiration-art">☀</div><div class="inspiration-copy"><strong>每天 10 分钟的专注小岛</strong><span>习惯 · 轻量计划</span></div><button class="remix-button" data-fill="帮我做一个每天10分钟的专注小岛">使用</button></div>
-              <div class="inspiration-card"><div class="inspiration-art" style="background: var(--lavender);">✿</div><div class="inspiration-copy"><strong>给朋友的随机鼓励生成器</strong><span>互动 · 分享卡片</span></div><button class="remix-button" data-fill="帮我做一个给朋友生成随机鼓励的互动卡片">使用</button></div>
-            </div>
-          </div>
-          <aside class="credit-card">
-            <span class="eyebrow" style="color: rgba(255,255,255,0.62);"><i></i> Your Bee studio</span>
-            <strong>今天的灵感额度<br />还有很多。</strong>
-            <p>每一次生成都会留下一个可以继续玩的版本。先做出来，再慢慢变好。</p>
-            <button class="primary-button" data-toast="灵感额度充足">查看额度 <span>→</span></button>
-            <div class="steps">
-              <div class="step"><span class="step-index">1</span><div><strong>写下一个想法</strong><span>越具体，越容易得到好玩的结果。</span></div></div>
-              <div class="step"><span class="step-index">2</span><div><strong>选择一个素材</strong><span>图片、声音和 Skills 都可以加入。</span></div></div>
-              <div class="step"><span class="step-index">3</span><div><strong>试玩并发布</strong><span>把它交给朋友，一起继续玩。</span></div></div>
-            </div>
-          </aside>
-        </div>
-      </section>
-
-      <section class="view" id="messagesView" data-view="messages">
-        <div class="view-header">
-          <div><h1>消息，<br />保持连接。</h1><p>这里会放你的关注动态、创作反馈和蜂玩系统消息。</p></div>
-          <button class="secondary-button" data-toast="全部消息已标记为已读">全部已读</button>
-        </div>
-        <div class="messages-grid">
-          <div class="message-panel">
-            <div class="notification-banner"><div class="notification-icon">♧</div><div class="notification-copy"><strong>开启通知</strong><span>接收朋友的最新动态，不错过下一只 Bee。</span></div><button id="enableNotifications">开启</button></div>
-            <div class="message-list">
-              <button class="message-item" data-toast="正在打开动态与关注">
-                <span class="message-item-icon">♟</span><span class="message-item-copy"><strong>动态与关注 <span class="official">官方</span></strong><p>点一下查看新的点赞、评论和关注消息。</p></span><span>›</span>
-              </button>
-              <button class="message-item" data-toast="正在打开系统消息">
-                <span class="message-item-icon">♧</span><span class="message-item-copy"><strong>系统消息 <span class="official">官方</span></strong><p>点一下查看蜂玩为你准备的新功能和提醒。</p></span><span>›</span>
-              </button>
-            </div>
-          </div>
-          <aside class="side-quote"><blockquote>每一次小小的完成，都会让下一次开始更容易。</blockquote><small>Beeplay daily note<br />蜂玩 · 让生活多一点游戏感</small></aside>
-        </div>
-      </section>
-
-      <section class="view" id="profileView" data-view="profile">
-        <div class="profile-layout">
-          <aside class="profile-card">
-            <img class="profile-avatar" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120'%3E%3Crect width='120' height='120' rx='36' fill='%23d8d6ff'/%3E%3Ccircle cx='61' cy='47' r='24' fill='%23171b1a'/%3E%3Cpath d='M25 108c5-28 22-43 37-43s32 15 37 43' fill='%23f27c45'/%3E%3Ccircle cx='53' cy='43' r='4' fill='%23fff'/%3E%3C/svg%3E" alt="Jastin Anna" />
-            <div><h2>Jastin Anna</h2><div class="handle">@jastin_anna</div><p class="profile-bio">喜欢把日常任务变成一点点可以玩的东西。</p></div>
-            <div class="profile-actions"><button data-toast="个人档案编辑器已打开">编辑个人档案</button><button data-toast="分享卡片已准备好">分享蜂巢 ↗</button></div>
-            <div class="profile-stats"><div class="profile-stat"><strong>12</strong><span>作品</span></div><div class="profile-stat"><strong>86</strong><span>收藏</span></div></div>
-          </aside>
-          <div class="profile-content">
-            <div class="profile-topline"><div><h1>我的蜂巢</h1><div class="profile-level">LV.1 <span class="level-track"><span></span></span> 450 / 1000 XP</div></div><button class="secondary-button" data-toast="任务中心已打开">查看成长任务</button></div>
-            <div class="tabs"><button class="tab active" data-profile-tab="works">我的作品</button><button class="tab" data-profile-tab="likes">喜欢</button><button class="tab" data-profile-tab="saved">收藏</button><button class="tab" data-profile-tab="history">历史</button></div>
-            <div class="profile-work-grid" id="profileWorkGrid"></div>
-          </div>
-        </div>
-      </section>
+    <main class="page" id="viewport">
+{% include "views/" ~ view ~ ".html" %}
     </main>
 
     <div class="bottom-spacer"></div>
@@ -1263,15 +1080,15 @@
 
   <nav class="bottom-nav" aria-label="主导航">
     <div class="nav-items">
-      <button class="nav-item active" data-view-target="home" aria-label="首页">
+      <button class="nav-item{% if view == 'home' %} active{% endif %}" data-view-target="home" hx-get="/" aria-label="首页">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12.5 12 4l9 8.5"/><path d="M5 10.8V20h14v-9.2"/><path d="M9 20v-5h6v5"/></svg>
       </button>
-      <button class="nav-item" data-view-target="discover" aria-label="探索">
+      <button class="nav-item{% if view == 'discover' %} active{% endif %}" data-view-target="discover" hx-get="/discover" aria-label="探索">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m15.4 8.6-2.1 4.7-4.7 2.1 2.1-4.7 4.7-2.1Z"/></svg>
       </button>
       <button class="floating-create" data-action="create" aria-label="开始创作">+</button>
-      <button class="nav-item" data-view-target="messages" aria-label="消息"><span style="font-size: 22px;">♧</span><span class="dot" aria-hidden="true"></span></button>
-      <button class="nav-item" data-view-target="profile" aria-label="个人"><span style="font-size: 22px;">●</span></button>
+      <button class="nav-item{% if view == 'messages' %} active{% endif %}" data-view-target="messages" hx-get="/messages" aria-label="消息"><span style="font-size: 22px;">♧</span><span class="dot" aria-hidden="true"></span></button>
+      <button class="nav-item{% if view == 'profile' %} active{% endif %}" data-view-target="profile" hx-get="/profile" aria-label="个人"><span style="font-size: 22px;">●</span></button>
     </div>
   </nav>
 
@@ -1288,225 +1105,7 @@
 
   <div class="toast" id="toast" role="status"></div>
 
-  <script>
-    const works = {{ works | tojson }};
-
-    const profileWorks = {{ profile_works | tojson }};
-
-    const viewEls = [...document.querySelectorAll(".view")];
-    const navEls = [...document.querySelectorAll(".nav-item")];
-    const modal = document.getElementById("createModal");
-    const toast = document.getElementById("toast");
-    const homeFeed = document.getElementById("homeFeed");
-    const gameCards = [...document.querySelectorAll(".game-card")];
-    let toastTimer;
-    let feedWheelLocked = false;
-
-    function showToast(message) {
-      toast.textContent = message;
-      toast.classList.add("show");
-      clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => toast.classList.remove("show"), 2200);
-    }
-
-    function switchView(viewName) {
-      viewEls.forEach(view => view.classList.toggle("active", view.dataset.view === viewName));
-      navEls.forEach(nav => nav.classList.toggle("active", nav.dataset.viewTarget === viewName));
-      document.querySelectorAll(".desktop-nav button").forEach(nav => nav.classList.toggle("active", nav.dataset.viewTarget === viewName));
-      document.body.classList.toggle("feed-mode", viewName === "home");
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }
-
-    function openCreateModal() {
-      modal.classList.add("open");
-      document.body.style.overflow = "hidden";
-    }
-
-    function closeCreateModal() {
-      modal.classList.remove("open");
-      document.body.style.overflow = "";
-    }
-
-    function renderWorks(filter = "all") {
-      const grid = document.getElementById("workGrid");
-      const visible = filter === "all" ? works : works.filter(work => work.category === filter);
-      grid.innerHTML = visible.map(work => `
-        <article class="work-card" data-work-title="${work.title.toLowerCase()}">
-          <div class="work-art ${work.art}"><span>${work.emoji}</span></div>
-          <div class="work-copy"><strong>${work.title}</strong><span>${work.author}</span><div class="work-stats"><span>◉ ${work.views}</span><span>♥ ${work.likes}</span></div></div>
-        </article>
-      `).join("");
-    }
-
-    function renderProfileWorks(tab = "works") {
-      const grid = document.getElementById("profileWorkGrid");
-      if (tab !== "works") {
-        grid.innerHTML = `<div class="empty-state"><div><div style="font-size: 56px;">✦</div><h3>${tab === "likes" ? "还没有喜欢的作品" : tab === "saved" ? "收藏夹还是空的" : "还没有浏览记录"}</h3><p>去探索一些新的 Bee，让这里慢慢长出来。</p></div></div>`;
-        return;
-      }
-      grid.innerHTML = profileWorks.map(work => `
-        <article class="work-card">
-          <div class="work-art ${work.art}"><span>${work.emoji}</span></div>
-          <div class="work-copy"><strong>${work.title}</strong><span>${work.author}</span><div class="work-stats"><span>◉ ${work.views}</span><span>♥ ${work.likes}</span></div></div>
-        </article>
-      `).join("");
-    }
-
-    renderWorks();
-    renderProfileWorks();
-
-    document.addEventListener("click", (event) => {
-      const gameAction = event.target.closest("[data-game-action]");
-      if (gameAction) {
-        const gameCard = gameAction.closest(".game-card");
-        const title = gameCard?.dataset.gameTitle || "这个游戏";
-        const action = gameAction.dataset.gameAction;
-        if (action === "play") {
-          gameAction.classList.toggle("active");
-          gameAction.textContent = gameAction.classList.contains("active") ? "Ⅱ" : "▶";
-          showToast(gameAction.classList.contains("active") ? `正在试玩 ${title}` : `已暂停 ${title}`);
-        }
-        if (action === "like") {
-          gameAction.classList.toggle("active");
-          showToast(gameAction.classList.contains("active") ? `已喜欢 ${title}` : `已取消喜欢`);
-        }
-        if (action === "save") {
-          gameAction.classList.toggle("active");
-          showToast(gameAction.classList.contains("active") ? `已收藏 ${title}` : `已取消收藏`);
-        }
-        if (action === "share") showToast(`分享卡片已准备好：${title}`);
-        return;
-      }
-
-      const viewTarget = event.target.closest("[data-view-target]");
-      if (viewTarget) {
-        switchView(viewTarget.dataset.viewTarget);
-        return;
-      }
-
-      const createTrigger = event.target.closest("[data-action='create']");
-      if (createTrigger) {
-        openCreateModal();
-        return;
-      }
-
-      const toastTarget = event.target.closest("[data-toast]");
-      if (toastTarget) {
-        showToast(toastTarget.dataset.toast);
-      }
-    });
-
-    function moveFeed(direction) {
-      if (!homeFeed || !gameCards.length) return;
-      const currentIndex = Math.max(0, gameCards.findIndex(card => {
-        const distance = Math.abs(card.getBoundingClientRect().top - homeFeed.getBoundingClientRect().top);
-        return distance < 40;
-      }));
-      const nextIndex = Math.min(gameCards.length - 1, Math.max(0, currentIndex + direction));
-      gameCards[nextIndex].scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-
-    if (homeFeed) {
-      homeFeed.addEventListener("wheel", (event) => {
-        if (Math.abs(event.deltaY) < 8 || feedWheelLocked) return;
-        event.preventDefault();
-        feedWheelLocked = true;
-        moveFeed(event.deltaY > 0 ? 1 : -1);
-        setTimeout(() => { feedWheelLocked = false; }, 520);
-      }, { passive: false });
-    }
-
-    document.getElementById("closeModal").addEventListener("click", closeCreateModal);
-    modal.addEventListener("click", (event) => {
-      if (event.target === modal) closeCreateModal();
-      const choice = event.target.closest("[data-modal-choice]");
-      if (!choice) return;
-      closeCreateModal();
-      switchView("create");
-      if (choice.dataset.modalChoice === "habit") document.getElementById("ideaInput").value = "帮我做一个每天都想打开的习惯计划";
-      if (choice.dataset.modalChoice === "remix") document.getElementById("ideaInput").value = "我想 Remix 一个轻松、有一点惊喜的互动作品";
-      setTimeout(() => document.getElementById("ideaInput").focus(), 250);
-    });
-
-    document.querySelectorAll(".category-pill").forEach(button => {
-      button.addEventListener("click", () => {
-        document.querySelectorAll(".category-pill").forEach(item => item.classList.remove("active"));
-        button.classList.add("active");
-        renderWorks(button.dataset.category);
-      });
-    });
-
-    document.querySelectorAll(".task-check").forEach(button => {
-      button.addEventListener("click", () => {
-        const row = button.closest(".task-row");
-        row.classList.toggle("complete");
-        button.textContent = row.classList.contains("complete") ? "✓" : "○";
-        showToast(row.classList.contains("complete") ? "任务完成，蜂蜜积分 +10" : "已取消完成状态");
-      });
-    });
-
-    document.querySelectorAll("[data-fill]").forEach(button => {
-      button.addEventListener("click", () => {
-        document.getElementById("ideaInput").value = button.dataset.fill;
-        document.getElementById("ideaInput").focus();
-      });
-    });
-
-    document.querySelectorAll("[data-tool]").forEach(button => {
-      button.addEventListener("click", () => {
-        button.classList.toggle("active");
-      });
-    });
-
-    document.getElementById("ideaSubmit").addEventListener("click", () => {
-      const input = document.getElementById("ideaInput");
-      if (!input.value.trim()) {
-        input.focus();
-        showToast("先写下一句想法吧");
-        return;
-      }
-      showToast("Bee 正在把你的想法变成一个可玩的版本…");
-      setTimeout(() => showToast("初版完成，马上可以开始试玩"), 1700);
-    });
-
-    document.getElementById("enableNotifications").addEventListener("click", () => {
-      if ("Notification" in window && Notification.permission === "default") {
-        Notification.requestPermission().then(permission => showToast(permission === "granted" ? "通知已开启" : "你可以稍后在浏览器设置中开启"));
-      } else {
-        showToast("通知偏好已更新");
-      }
-    });
-
-    document.querySelectorAll("[data-profile-tab]").forEach(button => {
-      button.addEventListener("click", () => {
-        document.querySelectorAll("[data-profile-tab]").forEach(item => item.classList.remove("active"));
-        button.classList.add("active");
-        renderProfileWorks(button.dataset.profileTab);
-      });
-    });
-
-    document.getElementById("notificationButton").addEventListener("click", () => switchView("messages"));
-    document.getElementById("creditPill").addEventListener("click", () => showToast("你的蜂蜜积分余额：1,000"));
-
-    document.getElementById("searchInput").addEventListener("input", (event) => {
-      const keyword = event.target.value.trim().toLowerCase();
-      document.querySelectorAll("#workGrid .work-card").forEach(card => {
-        card.style.display = !keyword || card.dataset.workTitle.includes(keyword) ? "" : "none";
-      });
-    });
-
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && modal.classList.contains("open")) closeCreateModal();
-      if (modal.classList.contains("open")) return;
-      if (event.key === "ArrowDown" && document.getElementById("homeView").classList.contains("active")) {
-        event.preventDefault();
-        moveFeed(1);
-      }
-      if (event.key === "ArrowUp" && document.getElementById("homeView").classList.contains("active")) {
-        event.preventDefault();
-        moveFeed(-1);
-      }
-    });
-  </script>
+  <script src="/assets/vendor/htmx.min.js"></script>
+  <script src="/assets/js/app.js"></script>
 </body>
 </html>

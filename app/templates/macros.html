@@ -1,0 +1,6 @@
+{% macro work_card(work, searchable=False) -%}
+<article class="work-card"{% if searchable %} data-work-title="{{ work.title|lower }}"{% endif %}>
+  <div class="work-art {{ work.art }}"><span>{{ work.emoji }}</span></div>
+  <div class="work-copy"><strong>{{ work.title }}</strong><span>{{ work.author }}</span><div class="work-stats"><span>◉ {{ work.views }}</span><span>♥ {{ work.likes }}</span></div></div>
+</article>
+{%- endmacro %}

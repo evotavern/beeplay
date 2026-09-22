@@ -1,0 +1,3 @@
+{% from "macros.html" import work_card %}
+{% for work in works %}{{ work_card(work, searchable=True) }}
+{% endfor %}

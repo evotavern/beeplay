@@ -32,9 +32,14 @@ npm run icons
 ## 项目结构
 
 ```text
-app/main.py                # FastAPI 应用入口
+app/main.py                # FastAPI 应用入口与路由
 app/data.py                # 页面种子数据（后续由数据库取代）
-app/templates/index.html   # 当前交互原型模板
+app/templates/base.html    # 页面外壳：顶栏、导航、弹窗
+app/templates/views/       # 五个视图，由 htmx 换入 #viewport
+app/templates/partials/    # 可单独换入的片段（作品网格等）
+app/templates/macros.html  # 作品卡片宏
+assets/js/app.js           # 交互脚本（全部使用事件委托）
+assets/vendor/htmx.min.js  # htmx 2.0.4（本地打包，不用 CDN）
 assets/brand/              # 品牌参考资源
 assets/icons/              # Logo、吉祥物和功能图标
 tools/export-icons.cjs     # 图标导出脚本

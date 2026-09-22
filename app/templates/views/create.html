@@ -1,0 +1,42 @@
+      <section class="view active" id="createView" data-view="create">
+        <div class="create-layout">
+          <div class="create-panel">
+            <div class="eyebrow"><i></i> Create a little magic</div>
+            <h1>说出一个想法，蜂玩帮你把它做出来。</h1>
+            <p>可以是一个小工具、一个互动游戏、一套习惯计划，或者只是一个你想每天看见的画面。先写下来，剩下的交给 Bee。</p>
+            <div class="idea-box">
+              <textarea id="ideaInput" placeholder="输入你的想法，开始建立……"></textarea>
+              <div class="idea-bottom">
+                <div class="idea-tools">
+                  <button class="tool-button" data-tool="inspiration" data-toast="已填入一个灵感提示" aria-label="灵感提示">✦</button>
+                  <button class="tool-button" data-tool="voice" data-toast="语音输入已开启" aria-label="语音输入">⌕</button>
+                  <button class="tool-button" data-tool="image" data-toast="图片素材入口已打开" aria-label="添加图片">▧</button>
+                </div>
+                <button class="idea-submit" id="ideaSubmit" aria-label="开始生成">→</button>
+              </div>
+            </div>
+            <div class="tool-strip">
+              <button class="tool-chip" data-tool="image" data-toast="图片素材入口已打开">▧ 图片</button>
+              <button class="tool-chip" data-tool="sound" data-toast="音效素材入口已打开">♫ 音效</button>
+              <button class="tool-chip" data-tool="skills" data-toast="Skills 面板已打开">✚ Skills</button>
+              <button class="tool-chip" data-tool="memes" data-toast="Memes 素材入口已打开">☻ Memes</button>
+            </div>
+            <div class="section-heading" style="margin-top: 30px;"><div><h2>需要灵感？</h2><p>从一个小而具体的愿望开始。</p></div><button data-toast="已换一条灵感">换一条 ↗</button></div>
+            <div class="inspiration-list" style="margin-top: 13px;">
+              <div class="inspiration-card"><div class="inspiration-art">☀</div><div class="inspiration-copy"><strong>每天 10 分钟的专注小岛</strong><span>习惯 · 轻量计划</span></div><button class="remix-button" data-fill="帮我做一个每天10分钟的专注小岛">使用</button></div>
+              <div class="inspiration-card"><div class="inspiration-art" style="background: var(--lavender);">✿</div><div class="inspiration-copy"><strong>给朋友的随机鼓励生成器</strong><span>互动 · 分享卡片</span></div><button class="remix-button" data-fill="帮我做一个给朋友生成随机鼓励的互动卡片">使用</button></div>
+            </div>
+          </div>
+          <aside class="credit-card">
+            <span class="eyebrow" style="color: rgba(255,255,255,0.62);"><i></i> Your Bee studio</span>
+            <strong>今天的灵感额度<br />还有很多。</strong>
+            <p>每一次生成都会留下一个可以继续玩的版本。先做出来，再慢慢变好。</p>
+            <button class="primary-button" data-toast="灵感额度充足">查看额度 <span>→</span></button>
+            <div class="steps">
+              <div class="step"><span class="step-index">1</span><div><strong>写下一个想法</strong><span>越具体，越容易得到好玩的结果。</span></div></div>
+              <div class="step"><span class="step-index">2</span><div><strong>选择一个素材</strong><span>图片、声音和 Skills 都可以加入。</span></div></div>
+              <div class="step"><span class="step-index">3</span><div><strong>试玩并发布</strong><span>把它交给朋友，一起继续玩。</span></div></div>
+            </div>
+          </aside>
+        </div>
+      </section>

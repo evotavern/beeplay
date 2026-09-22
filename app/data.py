@@ -20,3 +20,20 @@ PROFILE_WORKS = [
     {"title": "A Little Bee", "author": "Jastin Anna", "category": "relax", "emoji": "🐝", "art": "art-two", "views": "86", "likes": "19"},
     {"title": "Daily Spark", "author": "Jastin Anna", "category": "puzzle", "emoji": "✦", "art": "art-three", "views": "64", "likes": "12"},
 ]
+
+
+PROFILE_TABS = {
+    "works": None,
+    "likes": "还没有喜欢的作品",
+    "saved": "收藏夹还是空的",
+    "history": "还没有浏览记录",
+}
+
+CATEGORIES = ("all", "focus", "relax", "physics", "puzzle")
+
+
+def works_for(category: str) -> list[dict]:
+    """Works in a discover category; 'all' (or anything unknown) returns every work."""
+    if category not in CATEGORIES or category == "all":
+        return WORKS
+    return [work for work in WORKS if work["category"] == category]
