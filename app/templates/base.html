@@ -625,6 +625,26 @@
     .choice-icon { width: 44px; height: 44px; border-radius: 15px; background: var(--lime-light); display: grid; place-items: center; font-size: 22px; }
     .modal-choice strong { display: block; font-size: 14px; }
     .modal-choice span { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
+    .import-game-form { display: grid; gap: 14px; }
+    .import-game-form[hidden], .create-choices[hidden] { display: none; }
+    .import-dropzone { min-height: 156px; padding: 20px; border: 2px dashed rgba(151,189,56,0.52); border-radius: 22px; background: var(--mint); display: grid; place-items: center; align-content: center; gap: 6px; color: var(--ink); text-align: center; transition: background 160ms ease, border-color 160ms ease, transform 160ms ease; }
+    .import-dropzone:hover { border-color: var(--lime-dark); transform: translateY(-1px); }
+    .import-dropzone.dragging { border-color: var(--lime-dark); background: var(--lime-light); }
+    .import-drop-icon { width: 42px; height: 42px; border-radius: 15px; display: grid; place-items: center; background: var(--ink); color: var(--lime); font-size: 21px; }
+    .import-dropzone strong { font-size: 14px; }
+    .import-dropzone small { color: var(--muted); font-size: 12px; }
+    .import-sources { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+    .import-source { min-height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--white); color: var(--ink); font-size: 12px; font-weight: 850; }
+    .import-source:hover { border-color: var(--lime-dark); }
+    .import-title-label { display: grid; gap: 7px; color: var(--muted); font-size: 12px; font-weight: 800; }
+    .import-title-label span { font-weight: 500; }
+    .import-title { width: 100%; min-height: 44px; padding: 0 13px; border: 1px solid var(--line); border-radius: 14px; background: var(--white); color: var(--ink); }
+    .import-file-input { position: absolute; inline-size: 1px; block-size: 1px; opacity: 0; }
+    .import-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .import-back { min-height: 42px; padding: 0 12px; border: 0; background: transparent; color: var(--muted); font-size: 13px; font-weight: 850; }
+    .import-submit { min-height: 42px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--ink); color: var(--white); font-size: 13px; font-weight: 850; }
+    .import-submit:disabled { opacity: 0.56; cursor: wait; }
+    .import-status { min-height: 17px; margin: -5px 0 0; color: var(--muted); font-size: 12px; text-align: center; }
 
     /* Game host. Full-bleed and above the nav, so the game gets the whole
        viewport rather than a card-sized box with beeplay chrome around it.
@@ -1131,11 +1151,23 @@
 
   <div class="modal-backdrop" id="createModal" role="dialog" aria-modal="true" aria-labelledby="createModalTitle">
     <div class="modal">
-      <div class="modal-head"><div><h2 id="createModalTitle">你想玩什么？</h2><p>选择一个入口，马上开始你的 Bee。</p></div><button class="close-button" id="closeModal" aria-label="关闭">×</button></div>
+      <div class="modal-head"><div><h2 id="createModalTitle">你想玩什么？</h2><p id="createModalDescription">选择一个入口，马上开始你的 Bee。</p></div><button class="close-button" id="closeModal" aria-label="关闭">×</button></div>
       <div class="modal-body">
-        <button class="modal-choice" data-modal-choice="idea"><span class="choice-icon">✦</span><span><strong>从一个想法开始</strong><span>输入一句话，让 Beeplay 帮你建立第一个版本。</span></span></button>
-        <button class="modal-choice" data-modal-choice="habit"><span class="choice-icon">☀</span><span><strong>做一个习惯计划</strong><span>把想坚持的事变成每天都想打开的小任务。</span></span></button>
-        <button class="modal-choice" data-modal-choice="remix"><span class="choice-icon">↗</span><span><strong>Remix 一个作品</strong><span>从社区里的灵感出发，做成属于你的版本。</span></span></button>
+        <div class="create-choices" id="createChoices">
+          <button class="modal-choice" data-modal-choice="idea"><span class="choice-icon">✦</span><span><strong>从一个想法开始</strong><span>输入一句话，让 Beeplay 帮你建立第一个版本。</span></span></button>
+          <button class="modal-choice" data-modal-choice="habit"><span class="choice-icon">☀</span><span><strong>做一个习惯计划</strong><span>把想坚持的事变成每天都想打开的小任务。</span></span></button>
+          <button class="modal-choice" data-modal-choice="remix"><span class="choice-icon">↗</span><span><strong>Remix 一个作品</strong><span>从社区里的灵感出发，做成属于你的版本。</span></span></button>
+          <button class="modal-choice" data-modal-choice="import"><span class="choice-icon">▣</span><span><strong>导入一个完成的小游戏</strong><span>带入已有的 HTML 游戏，加入首页游戏流。</span></span></button>
+        </div>
+        <form class="import-game-form" id="importGameForm" hidden>
+          <input class="import-file-input" id="importGameZip" type="file" accept=".zip,application/zip" />
+          <input class="import-file-input" id="importGameFolder" type="file" webkitdirectory multiple />
+          <button class="import-dropzone" id="importDropzone" type="button"><span class="import-drop-icon">▣</span><strong id="importSelection">拖入一个 zip 游戏包</strong><small>或从下方选择构建后的 dist 文件夹</small></button>
+          <div class="import-sources"><button class="import-source" type="button" id="chooseGameFolder">选择 dist 文件夹</button><button class="import-source" type="button" id="chooseGameZip">选择 zip 包</button></div>
+          <label class="import-title-label" for="importGameTitle">游戏名称 <span>可选</span><input class="import-title" id="importGameTitle" maxlength="120" placeholder="例如：Block Drop" /></label>
+          <div class="import-footer"><button class="import-back" type="button" id="importBack">← 返回</button><button class="import-submit" type="submit">加入游戏流 →</button></div>
+          <p class="import-status" id="importStatus" role="status"></p>
+        </form>
       </div>
     </div>
   </div>

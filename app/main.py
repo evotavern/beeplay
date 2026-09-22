@@ -2,15 +2,16 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.data import PROFILE_TABS
 from app.db import get_session, init_db
-from app.repository import discover_works, feed_games, profile_works
+from app.game_imports import GameImportError, install_folder, install_zip
+from app.repository import discover_works, feed_games, profile_works, register_imported_game
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -114,3 +115,35 @@ def profile_works_partial(
     return templates.TemplateResponse(
         request, "partials/profile_grid.html", profile_context(session, tab)
     )
+
+
+@app.post("/api/import-game", response_class=JSONResponse)
+async def import_game(
+    title: str = Form(""),
+    bundle: UploadFile | None = File(None),
+    files: list[UploadFile] | None = File(None),
+    paths: list[str] | None = Form(None),
+    session: Session = Depends(get_session),
+) -> JSONResponse:
+    """Import a finished static game through the existing creator modal."""
+    try:
+        if bundle is not None:
+            artifact = install_zip(await bundle.read(), GAMES_DIR)
+            fallback_title = Path(bundle.filename or "新小游戏").stem
+        else:
+            uploaded = files or []
+            relative_paths = paths or []
+            if len(uploaded) != len(relative_paths):
+                raise GameImportError("游戏文件路径不完整")
+            artifact = install_folder(
+                [(path, await file.read()) for file, path in zip(uploaded, relative_paths)],
+                GAMES_DIR,
+            )
+            fallback_title = Path(relative_paths[0]).parts[0] if relative_paths else "新小游戏"
+    except GameImportError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    game = register_imported_game(
+        session, artifact_hash=artifact, title=(title.strip() or fallback_title)[:120]
+    )
+    return JSONResponse({"title": game.title, "artifact": artifact})
