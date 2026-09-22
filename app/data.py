@@ -22,6 +22,22 @@ PROFILE_WORKS = [
 ]
 
 
+# Playable games in the home feed. Seeded by hand while generation does not
+# exist yet; artifact_hash is the directory under the games root.
+FEED_GAMES = [
+    {
+        "title": "今日咖啡心情",
+        "author": "MOOD CAFÉ",
+        "category": "relax",
+        "emoji": "☕",
+        "art": "art-one",
+        "views": "0",
+        "likes": "0",
+        "artifact_hash": "af359667cf6a8038",
+    },
+]
+
+
 PROFILE_TABS = {
     "works": None,
     "likes": "还没有喜欢的作品",

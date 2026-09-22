@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.data import PROFILE_TABS
 from app.db import get_session, init_db
-from app.repository import discover_works, profile_works
+from app.repository import discover_works, first_playable, profile_works
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -70,8 +70,8 @@ def profile_context(session: Session, tab: str) -> dict:
 
 
 @app.get("/", response_class=HTMLResponse)
-def home(request: Request) -> HTMLResponse:
-    return render_view(request, "home")
+def home(request: Request, session: Session = Depends(get_session)) -> HTMLResponse:
+    return render_view(request, "home", playable=first_playable(session))
 
 
 @app.get("/discover", response_class=HTMLResponse)

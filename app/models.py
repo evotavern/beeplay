@@ -29,3 +29,8 @@ class Work(Base):
 
     # Preserves the fixture ordering so grids stay deterministic.
     position: Mapped[int]
+
+    # Directory name under the games root, i.e. /games/<artifact_hash>/index.html.
+    # Null means the work is a fixture with nothing to play. Becomes a foreign
+    # key to an artifacts table once generation produces them.
+    artifact_hash: Mapped[str | None] = mapped_column(default=None, index=True)

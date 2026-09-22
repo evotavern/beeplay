@@ -19,3 +19,12 @@ def profile_works(session: Session) -> list[Work]:
             select(Work).where(Work.collection == "profile").order_by(Work.position)
         )
     )
+
+
+def first_playable(session: Session) -> Work | None:
+    """The first feed game with an artifact on disk, or None if nothing is playable."""
+    return session.scalars(
+        select(Work)
+        .where(Work.collection == "feed", Work.artifact_hash.is_not(None))
+        .order_by(Work.position)
+    ).first()

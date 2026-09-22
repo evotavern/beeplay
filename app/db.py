@@ -5,7 +5,7 @@ from pathlib import Path
 from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.data import PROFILE_WORKS, WORKS
+from app.data import FEED_GAMES, PROFILE_WORKS, WORKS
 from app.models import Base, Work
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -53,7 +53,11 @@ def init_db() -> None:
         session.add_all(
             [
                 Work(collection=collection, position=position, **fixture)
-                for collection, fixtures in (("discover", WORKS), ("profile", PROFILE_WORKS))
+                for collection, fixtures in (
+                    ("discover", WORKS),
+                    ("profile", PROFILE_WORKS),
+                    ("feed", FEED_GAMES),
+                )
                 for position, fixture in enumerate(fixtures)
             ]
         )

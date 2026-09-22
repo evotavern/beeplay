@@ -626,6 +626,14 @@
     .modal-choice strong { display: block; font-size: 14px; }
     .modal-choice span { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
 
+    /* Game host. Full-bleed and above the nav, so the game gets the whole
+       viewport rather than a card-sized box with beeplay chrome around it.
+       Sits below .toast so notifications stay visible over a running game. */
+    #gameHost { position: fixed; inset: 0; z-index: 60; background: var(--ink); }
+    #gameHost iframe { width: 100%; height: 100%; border: 0; display: block; }
+    /* The card's own Ⅱ is underneath this overlay and unreachable, so the stop
+       control belongs to the host. */
+    #gameStop { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 14px); right: 14px; z-index: 1; width: 40px; height: 40px; border: 0; border-radius: 50%; background: rgba(23,27,26,0.62); color: var(--white); font-size: 20px; line-height: 1; }
     .toast { position: fixed; z-index: 80; left: 50%; bottom: 104px; transform: translate(-50%, 16px); padding: 12px 16px; color: var(--white); background: var(--ink); border-radius: 999px; font-size: 13px; font-weight: 800; opacity: 0; pointer-events: none; transition: opacity 180ms ease, transform 180ms ease; }
     .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
@@ -1038,6 +1046,12 @@
         box-shadow: 0 20px 80px rgba(48, 62, 18, 0.2);
       }
     }
+
+    /* Feed lock while a game is running. These live at the end of the sheet on
+       purpose: body.mobile-preview .home-feed has equal specificity and is
+       declared later, so an earlier rule here would lose on source order. */
+    body.playing { overflow: hidden; }
+    body.playing .home-feed { scroll-snap-type: none; overflow-y: hidden; touch-action: none; }
   </style>
 </head>
 <body class="mobile-preview{% if view == 'home' %} feed-mode{% endif %}"
@@ -1101,6 +1115,12 @@
         <button class="modal-choice" data-modal-choice="remix"><span class="choice-icon">↗</span><span><strong>Remix 一个作品</strong><span>从社区里的灵感出发，做成属于你的版本。</span></span></button>
       </div>
     </div>
+  </div>
+
+  <!-- Persistent game host. Body-level on purpose: anything inside #viewport is
+       destroyed by an htmx nav swap, which would kill a session mid-brew. -->
+  <div id="gameHost" hidden>
+    <button id="gameStop" aria-label="结束试玩">×</button>
   </div>
 
   <div class="toast" id="toast" role="status"></div>

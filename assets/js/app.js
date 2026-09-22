@@ -59,7 +59,7 @@
 
   document.addEventListener("wheel", function (event) {
     if (!event.target.closest || !event.target.closest(".home-feed")) return;
-    if (Math.abs(event.deltaY) < 8 || feedWheelLocked) return;
+    if (Math.abs(event.deltaY) < 8 || feedWheelLocked || gamePlaying()) return;
     event.preventDefault();
     feedWheelLocked = true;
     moveFeed(event.deltaY > 0 ? 1 : -1);
@@ -77,10 +77,7 @@
       var title = (gameCard && gameCard.dataset.gameTitle) || "这个游戏";
       var action = gameAction.dataset.gameAction;
       if (action === "play") {
-        gameAction.classList.toggle("active");
-        var playing = gameAction.classList.contains("active");
-        gameAction.textContent = playing ? "Ⅱ" : "▶";
-        showToast(playing ? "正在试玩 " + title : "已暂停 " + title);
+        togglePlay(gameCard, gameAction, title);
       }
       if (action === "like") {
         gameAction.classList.toggle("active");
@@ -211,8 +208,145 @@
     if (event.key === "Escape" && modal.classList.contains("open")) closeCreateModal();
     if (modal.classList.contains("open")) return;
     if (currentView() !== "home") return;
+    if (gamePlaying()) return;
     if (event.key === "ArrowDown") { event.preventDefault(); moveFeed(1); }
     if (event.key === "ArrowUp") { event.preventDefault(); moveFeed(-1); }
+  });
+
+
+  // --- inline game host ------------------------------------------------
+  // A game is an offline H5 artifact in its own sandboxed iframe. The iframe
+  // lives in #gameHost, a body-level sibling of #viewport, for one reason:
+  // htmx replaces #viewport wholesale on every nav, which destroys any iframe
+  // inside it and the running game with it. Body level is what lets a full
+  // four-stage session survive navigation. #createModal and #toast sit at the
+  // same level for the same reason.
+  //
+  // The host is NEVER reparented. Moving an iframe node in the DOM reloads its
+  // document in every browser, which would destroy exactly the session this
+  // design exists to preserve. It is positioned over the playing card by
+  // setting style from the card's measured box — never by appendChild.
+  var gameHost = document.getElementById("gameHost");
+
+  // One live session at a time: {hash, frame, card, active}. `active` false
+  // means paused — the iframe is still mounted and still holding game state,
+  // the host is just hidden and the feed unlocked.
+  var session = null;
+
+  function gamePlaying() {
+    return !!(session && session.active);
+  }
+
+  // Position the host over its card. Called on mount and whenever the card
+  // could have moved under it.
+  function anchorHost() {
+    if (!session || !session.card || !gameHost) return;
+    var box = session.card.getBoundingClientRect();
+    gameHost.style.top = box.top + "px";
+    gameHost.style.left = box.left + "px";
+    gameHost.style.width = box.width + "px";
+    gameHost.style.height = box.height + "px";
+  }
+
+  function mountGame(card, hash) {
+    var frame = document.createElement("iframe");
+    frame.src = "/games/" + hash + "/index.html";
+    // No allow-same-origin: the game runs on an opaque origin and cannot
+    // reach this document. There is deliberately no host API.
+    frame.setAttribute("sandbox", "allow-scripts");
+    frame.title = card.dataset.gameTitle || "游戏";
+    frame.className = "game-frame";
+    gameHost.appendChild(frame);
+    return frame;
+  }
+
+  function resumeGame(card, button) {
+    session.card = card;
+    session.active = true;
+    document.body.classList.add("playing");
+    if (button) { button.classList.add("active"); button.textContent = "Ⅱ"; }
+    anchorHost();
+  }
+
+  function pauseGame() {
+    if (!session) return;
+    session.active = false;
+    document.body.classList.remove("playing");
+    // Hidden, not unmounted: the document keeps running and keeps its state,
+    // so resuming returns the user to their half-made cup. Hiding via a class
+    // rather than display:none, which risks pausing or reloading the frame.
+    var button = session.card && session.card.querySelector('[data-game-action="play"]');
+    if (button) { button.classList.remove("active"); button.textContent = "▶"; }
+  }
+
+  // Destroys the document and the session with it. Only ever deliberate.
+  function endGame() {
+    if (!session) return;
+    pauseGame();
+    gameHost.innerHTML = "";
+    session = null;
+  }
+
+  function togglePlay(card, button, title) {
+    // No artifact means nothing to run; keep the prototype's toast.
+    var hash = card && card.dataset.artifact;
+    if (!hash || !gameHost) {
+      button.classList.toggle("active");
+      var on = button.classList.contains("active");
+      button.textContent = on ? "Ⅱ" : "▶";
+      showToast(on ? "正在试玩 " + title : "已暂停 " + title);
+      return;
+    }
+
+    if (session && session.hash === hash) {
+      if (session.active) pauseGame(); else resumeGame(card, button);
+      return;
+    }
+
+    // Switching games throws away the cup in progress, so make it a decision.
+    if (session && !window.confirm("换一个游戏会结束当前这局，确定吗？")) return;
+    endGame();
+
+    session = { hash: hash, frame: null, card: card, active: false };
+    session.frame = mountGame(card, hash);
+    resumeGame(card, button);
+  }
+
+  // Keep the host over its card if the viewport changes under it.
+  window.addEventListener("resize", anchorHost);
+  window.addEventListener("scroll", anchorHost, { passive: true });
+
+  // Nav guard. Hiding beeplay's chrome while body.playing removes the bottom
+  // nav from the screen, so stray taps largely disappear — but the topbar
+  // brand and nav links still carry hx-get, so leaving must stay deliberate.
+  document.addEventListener("click", function (event) {
+    if (!gamePlaying()) return;
+    var nav = event.target.closest("[hx-get], [data-view-target]");
+    if (!nav || gameHost.contains(nav)) return;
+    if (!window.confirm("离开会暂停这一局，确定吗？")) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    pauseGame();
+  }, true);
+
+  // The card is rebuilt on every swap, so re-find it by hash and re-anchor.
+  // A paused session survives the swap because the host is outside #viewport.
+  document.body.addEventListener("htmx:afterSwap", function (event) {
+    if (event.detail.target.id !== "viewport" || !session) return;
+    var card = document.querySelector('.game-card[data-artifact="' + session.hash + '"]');
+    session.card = card || null;
+    if (card) anchorHost();
+  });
+
+  // TODO(contract): the exit control is body-level markup owned by the other
+  // session — the card's own Ⅱ cannot serve, because .game-card sets
+  // isolation:isolate and a body-level host paints over the whole card
+  // including its z-index:4 buttons. Wire the real selector when it lands.
+  // Escape is an interim exit so the feed lock is never inescapable.
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && gamePlaying()) pauseGame();
   });
 
   syncChrome();
