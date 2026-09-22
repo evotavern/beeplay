@@ -50,6 +50,7 @@
   var importGameZip = document.getElementById("importGameZip");
   var importGameFolder = document.getElementById("importGameFolder");
   var importDropzone = document.getElementById("importDropzone");
+  var importSubmit = importGameForm.querySelector("[type='submit']");
   var importSelection = null;
 
   function setCreateModalCopy(title, description) {
@@ -67,6 +68,7 @@
     importGameForm.hidden = true;
     createChoices.hidden = false;
     importGameForm.reset();
+    importSubmit.disabled = false;
     importSelection = null;
     document.getElementById("importSelection").textContent = "拖入一个 zip 游戏包";
     document.getElementById("importStatus").textContent = "";
@@ -273,8 +275,7 @@
       document.getElementById("importStatus").textContent = "先选择一个 zip 或 dist 文件夹。";
       return;
     }
-    var submit = importGameForm.querySelector("[type='submit']");
-    submit.disabled = true;
+    importSubmit.disabled = true;
     var data = new FormData();
     data.append("title", document.getElementById("importGameTitle").value.trim());
     if (importSelection.kind === "zip") {
@@ -288,7 +289,9 @@
     document.getElementById("importStatus").textContent = "正在加入游戏流…";
     fetch("/api/import-game", { method: "POST", body: data })
       .then(function (response) {
-        return response.json().then(function (result) {
+        return response.json().catch(function () {
+          throw new Error(response.ok ? "导入失败" : "服务器拒绝了上传，请检查文件大小后重试");
+        }).then(function (result) {
           if (!response.ok) throw new Error(result.detail || "导入失败");
           return result;
         });
@@ -305,8 +308,8 @@
       })
       .catch(function (error) {
         document.getElementById("importStatus").textContent = error.message;
-        submit.disabled = false;
-      });
+      })
+      .finally(function () { importSubmit.disabled = false; });
   });
 
   // --- keyboard --------------------------------------------------------

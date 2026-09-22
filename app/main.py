@@ -118,7 +118,7 @@ def profile_works_partial(
 
 
 @app.post("/api/import-game", response_class=JSONResponse)
-async def import_game(
+def import_game(
     title: str = Form(""),
     bundle: UploadFile | None = File(None),
     files: list[UploadFile] | None = File(None),
@@ -128,7 +128,7 @@ async def import_game(
     """Import a finished static game through the existing creator modal."""
     try:
         if bundle is not None:
-            artifact = install_zip(await bundle.read(), GAMES_DIR)
+            artifact = install_zip(bundle.file.read(), GAMES_DIR)
             fallback_title = Path(bundle.filename or "新小游戏").stem
         else:
             uploaded = files or []
@@ -136,7 +136,7 @@ async def import_game(
             if len(uploaded) != len(relative_paths):
                 raise GameImportError("游戏文件路径不完整")
             artifact = install_folder(
-                [(path, await file.read()) for file, path in zip(uploaded, relative_paths)],
+                [(path, file.file.read()) for file, path in zip(uploaded, relative_paths)],
                 GAMES_DIR,
             )
             fallback_title = Path(relative_paths[0]).parts[0] if relative_paths else "新小游戏"
