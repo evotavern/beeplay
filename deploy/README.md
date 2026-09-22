@@ -45,8 +45,9 @@ sudo systemctl enable --now nginx
 sudo systemctl reload nginx
 ```
 
-`uv sync` downloads the required Python 3.12 runtime if the host does not
-already have it. Ensure the cloud firewall permits inbound TCP port 80.
+`uv sync` downloads a compatible Python runtime when the host does not
+already have one; Beeplay requires Python 3.12 or newer. Ensure the cloud
+firewall permits inbound TCP port 80.
 
 The app seeds its own SQLite database at `/var/lib/beeplay/beeplay.db` on
 first startup. The handoff game is listed in that seed data, and is rendered
