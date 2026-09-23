@@ -16,3 +16,5 @@ beeplay.db
 beeplay.db-wal
 beeplay.db-shm
 games/
+failed/
+logs/
