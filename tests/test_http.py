@@ -163,6 +163,21 @@ class HttpTests(unittest.TestCase):
             self.assertEqual(session.query(WorkLike).count(), 0)
             self.assertEqual(session.query(WorkSave).count(), 0)
 
+    def test_repeated_like_and_save_requests_are_idempotent(self) -> None:
+        with Session(self.engine) as session:
+            work_id = session.scalar(
+                select(Work.id).where(Work.artifact_hash == "af359667cf6a8038")
+            )
+        self.claim()
+
+        for active in (True, True, False, False):
+            like = self.client.post(f"/api/works/{work_id}/like", json={"active": active})
+            self.assertEqual(like.status_code, 200)
+            self.assertEqual(like.json(), {"active": active, "count": int(active)})
+            save = self.client.post(f"/api/works/{work_id}/save", json={"active": active})
+            self.assertEqual(save.status_code, 200)
+            self.assertEqual(save.json(), {"active": active})
+
 
 if __name__ == "__main__":
     unittest.main()

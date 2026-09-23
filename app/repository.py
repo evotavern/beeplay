@@ -1,7 +1,8 @@
 import secrets
 from datetime import datetime, timedelta
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -75,15 +76,20 @@ def _with_social_state(
     return works
 
 
-def discover_works(
-    session: Session, category: str, viewer: User | None = None
-) -> list[Work]:
-    """Live playable works shown in discover, newest first."""
-    stmt = select(Work).where(
+def _live_works():
+    """Works that are publicly playable: the feed, live, with a bundle."""
+    return select(Work).where(
         Work.collection == "feed",
         Work.status == "live",
         Work.artifact_hash.is_not(None),
     )
+
+
+def discover_works(
+    session: Session, category: str, viewer: User | None = None
+) -> list[Work]:
+    """Live playable works shown in discover, newest first."""
+    stmt = _live_works()
     if category in CATEGORIES and category != "all":
         stmt = stmt.where(Work.category == category)
     works = list(session.scalars(stmt.order_by(Work.created_at.desc(), Work.id.desc())))
@@ -160,13 +166,7 @@ def feed_games(session: Session, viewer: User | None = None) -> list[Work]:
     """Live games, newest first. The status column is the only source of truth."""
     works = list(
         session.scalars(
-            select(Work)
-            .where(
-                Work.collection == "feed",
-                Work.status == "live",
-                Work.artifact_hash.is_not(None),
-            )
-            .order_by(Work.created_at.desc(), Work.id.desc())
+            _live_works().order_by(Work.created_at.desc(), Work.id.desc())
         )
     )
     return _with_social_state(session, works, viewer)
@@ -176,26 +176,31 @@ def feed_games(session: Session, viewer: User | None = None) -> list[Work]:
 
 
 def _live_work(session: Session, work_id: int) -> Work | None:
-    return session.scalar(
-        select(Work).where(
-            Work.id == work_id,
-            Work.collection == "feed",
-            Work.status == "live",
-            Work.artifact_hash.is_not(None),
+    return session.scalar(_live_works().where(Work.id == work_id))
+
+
+def _set_membership(
+    session: Session, model, user: User, work_id: int, active: bool
+) -> None:
+    if _live_work(session, work_id) is None:
+        raise LookupError("work not found")
+    # Single idempotent statements: a read-then-write would 500 when two tabs
+    # or a retry race on the same (user, work) row.
+    if active:
+        session.execute(
+            sqlite_insert(model)
+            .values(user_id=user.id, work_id=work_id, created_at=utcnow())
+            .on_conflict_do_nothing()
         )
-    )
+    else:
+        session.execute(
+            delete(model).where(model.user_id == user.id, model.work_id == work_id)
+        )
+    session.commit()
 
 
 def set_like(session: Session, user: User, work_id: int, active: bool) -> tuple[bool, int]:
-    if _live_work(session, work_id) is None:
-        raise LookupError("work not found")
-    key = (user.id, work_id)
-    existing = session.get(WorkLike, key)
-    if active and existing is None:
-        session.add(WorkLike(user_id=user.id, work_id=work_id))
-    elif not active and existing is not None:
-        session.delete(existing)
-    session.commit()
+    _set_membership(session, WorkLike, user, work_id, active)
     total = session.scalar(
         select(func.count()).select_from(WorkLike).where(WorkLike.work_id == work_id)
     )
@@ -203,15 +208,7 @@ def set_like(session: Session, user: User, work_id: int, active: bool) -> tuple[
 
 
 def set_save(session: Session, user: User, work_id: int, active: bool) -> bool:
-    if _live_work(session, work_id) is None:
-        raise LookupError("work not found")
-    key = (user.id, work_id)
-    existing = session.get(WorkSave, key)
-    if active and existing is None:
-        session.add(WorkSave(user_id=user.id, work_id=work_id))
-    elif not active and existing is not None:
-        session.delete(existing)
-    session.commit()
+    _set_membership(session, WorkSave, user, work_id, active)
     return active
 
 

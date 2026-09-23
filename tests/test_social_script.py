@@ -20,6 +20,11 @@ class SocialScriptTests(unittest.TestCase):
         self.assertLess(native, recorded)
         self.assertLess(copied, recorded)
 
+    def test_a_completed_share_is_confirmed_before_it_is_counted(self) -> None:
+        confirmed = SCRIPT.index('showToast(navigator.share ? "已分享 "')
+        recorded = SCRIPT.index('socialFetch(card.dataset.gameId, "share"')
+        self.assertLess(confirmed, recorded)
+
     def test_completion_contract_remains_deliberately_deferred(self) -> None:
         self.assertIn("TODO(completion-contract)", SCRIPT)
         self.assertIn("ten real games", SCRIPT)

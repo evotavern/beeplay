@@ -234,10 +234,13 @@
         completed = await copyShareUrl(url.href);
       }
       if (!completed) throw new Error("没有复制成功，请重试");
-      var result = await socialFetch(card.dataset.gameId, "share", { event_id: interactionId() });
-      var counter = button.querySelector("[data-social-count='shares']");
-      if (counter && typeof result.count === "number") counter.textContent = result.count;
       showToast(navigator.share ? "已分享 " + title : "分享链接已复制");
+      // The share already happened; failing to count it must not read as a failed share.
+      try {
+        var result = await socialFetch(card.dataset.gameId, "share", { event_id: interactionId() });
+        var counter = button.querySelector("[data-social-count='shares']");
+        if (counter && typeof result.count === "number") counter.textContent = result.count;
+      } catch (recordError) {}
     } catch (error) {
       if (error.name !== "AbortError") showToast(error.message || "分享没有完成");
     } finally {

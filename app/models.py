@@ -107,7 +107,9 @@ class WorkLike(Base):
     __tablename__ = "work_likes"
 
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
-    work_id: Mapped[int] = mapped_column(ForeignKey("works.id"), primary_key=True)
+    work_id: Mapped[int] = mapped_column(
+        ForeignKey("works.id"), primary_key=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
@@ -117,7 +119,9 @@ class WorkSave(Base):
     __tablename__ = "work_saves"
 
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
-    work_id: Mapped[int] = mapped_column(ForeignKey("works.id"), primary_key=True)
+    work_id: Mapped[int] = mapped_column(
+        ForeignKey("works.id"), primary_key=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
