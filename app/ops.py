@@ -10,25 +10,30 @@
     beeplay-ops history WORK_ID              # the audit trail
     beeplay-ops refresh-reporter             # add the crash reporter to older games
     beeplay-ops migrate                      # schema + seed; release.sh runs it
+    beeplay-ops generations [--id ID]        # prompt-to-game speed and funnel
+    beeplay-ops generation-keys [--enable ID] # provider key health and usage
 
 SSH access is the only authentication. Every change is audited as ops:<user>.
 """
 
-import json
-import math
-import statistics
 import argparse
 import getpass
+import json
+import math
 import os
+import statistics
 import sys
 from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import config, db, health, ingest
+from app import config, db, generation, health, ingest
 from app.game_imports import REPORTER_MARKER, GameImportError, read_zip
-from app.models import STATUSES, FailedUpload, User, Work, WorkEvent
+from app.models import (
+    STATUSES, FailedUpload, Generation, GenerationAttempt, GenerationEvent, GenerationKey,
+    User, Work, WorkEvent,
+)
 
 
 def _actor() -> str:
@@ -171,9 +176,7 @@ def cmd_migrate(session: Session, args) -> None:
     print("database is at the latest schema")
 
 
-
 def cmd_generations(session, args):
-    from app.models import Generation, GenerationEvent, GenerationAttempt
     if args.id:
         job = session.get(Generation, args.id)
         if job is None:
@@ -190,16 +193,15 @@ def cmd_generations(session, args):
         print(f"{job.id} {job.status:<10} {job.model} {job.timings} error={job.error or '-'}")
     for model in sorted({job.model for job in jobs}):
         group = [job for job in jobs if job.model == model]
-        print(f"model={model} samples={len(group)} ready_or_published={sum(job.status in ('ready', 'published') for job in group)} failed={sum(job.status == 'failed' for job in group)}")
+        timings = [json.loads(job.timings) for job in group]
+        print(f"model={model} samples={len(group)} ready_or_published={sum(job.status in generation.PLAYABLE for job in group)} failed={sum(job.status == generation.FAILED for job in group)}")
         for metric in ("queue_ms", "provider_ms", "validation_ms", "playable_ms", "details_ms", "idle_wait_ms", "to_playtest_ms"):
-            values = sorted(json.loads(job.timings)[metric] for job in group if metric in json.loads(job.timings))
+            values = sorted(t[metric] for t in timings if metric in t)
             if values:
                 print(f"  {metric}: n={len(values)} p50={statistics.median(values):.0f} p95={values[max(0, math.ceil(len(values)*.95)-1)]}")
 
 
 def cmd_generation_keys(session, args):
-    from app import generation
-    from app.models import GenerationAttempt, GenerationKey
     configured = {generation.fingerprint(key) for key in config.EVOMAP_KEYS}
     if args.enable:
         row = session.get(GenerationKey, args.enable)

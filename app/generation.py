@@ -5,13 +5,15 @@ startup fails interrupted requests instead of silently paying to replay them.
 """
 import hashlib
 import html as html_module
+import http.client
 import json
 import re
 import threading
 import time
+import traceback
 import urllib.error
 import urllib.request
-from datetime import timedelta
+from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
 
 from sqlalchemy import select, text
@@ -20,7 +22,16 @@ from app import config, db, events
 from app.game_imports import inject_reporter
 from app.models import Generation, GenerationAttempt, GenerationEvent, GenerationKey, utcnow
 
-ACTIVE = ("queued", "generating", "validating")
+# Job lifecycle. The error codes a failed job carries are mirrored as
+# user-facing messages in assets/js/generation.js.
+QUEUED, GENERATING, VALIDATING = "queued", "generating", "validating"
+READY, PUBLISHED, FAILED = "ready", "published", "failed"
+ACTIVE = (QUEUED, GENERATING, VALIDATING)
+PLAYABLE = (READY, PUBLISHED)
+
+# Serialises this process's read-then-write sequences on generation rows
+# (idempotent submit, publish-once, key rotation). SQLite's own writer lock
+# covers the job claim, which must also hold across processes.
 LOCK = threading.RLock()
 MAX_RESPONSE = 512 * 1024
 CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
@@ -38,6 +49,13 @@ The surrounding app handles title, cover and publishing. Do not ask questions.
 """
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Do not follow redirects carrying a provider credential to another host."""
+
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
 def fingerprint(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()[:24]
 
@@ -49,6 +67,18 @@ def emit(session, job, kind, elapsed_ms=None):
 
 def elapsed(job):
     return max(0, int((utcnow() - job.created_at).total_seconds() * 1000))
+
+
+def since_ms(start, end):
+    return max(0, int((end - start).total_seconds() * 1000))
+
+
+def update_timings(job, **values):
+    """Merge values into the job's timings JSON and return the result."""
+    timings = json.loads(job.timings)
+    timings.update(values)
+    job.timings = json.dumps(timings)
+    return timings
 
 
 def choose_key(excluded):
@@ -66,7 +96,8 @@ def choose_key(excluded):
         if not choices:
             session.commit()
             return None
-        row, raw = min(choices, key=lambda pair: pair[0].last_used_at or utcnow().replace(year=2000))
+        # Least recently used first; never-used keys sort before all others.
+        row, raw = min(choices, key=lambda pair: pair[0].last_used_at or datetime.min)
         row.last_used_at = now
         session.commit()
         return row.id, raw
@@ -91,10 +122,6 @@ def request_game(key, model, prompt):
             {"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}],
             "max_tokens": config.GENERATION_MAX_TOKENS, "stream": False}).encode(),
         headers={"Content-Type": "application/json", "Authorization": "Bearer " + key})
-    # Do not follow redirects carrying a provider credential to another host.
-    class NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, *args, **kwargs):
-            return None
     opener = urllib.request.build_opener(NoRedirect)
     try:
         with opener.open(request, timeout=config.GENERATION_TIMEOUT_S) as response:
@@ -148,7 +175,7 @@ def normalize_html(content):
 def fail(job_id, code):
     with db.SessionLocal() as session:
         job = session.get(Generation, job_id)
-        job.status, job.error, job.finished_at = "failed", code, utcnow()
+        job.status, job.error, job.finished_at = FAILED, code, utcnow()
         emit(session, job, "failed", elapsed(job))
         session.commit()
 
@@ -170,8 +197,10 @@ def run_job(job_id):
         error = None
         try:
             status, headers, data = request_game(raw_key, model, prompt)
-        except Exception:
-            # Unknown completion state: no automatic retry/duplicate spending.
+        except (OSError, http.client.HTTPException, ValueError):
+            # Network failure, timeout or oversized body: the completion state
+            # is unknown, so no automatic retry/duplicate spending. Anything
+            # else is a bug and reaches Worker.loop, which logs it.
             error = "provider_connection_failed"
         latency = int((time.monotonic() - start) * 1000)
         error_data = data.get("error", {}) if isinstance(data, dict) else {}
@@ -200,10 +229,9 @@ def run_job(job_id):
         break
     with LOCK, db.SessionLocal() as session:
         job = session.get(Generation, job_id)
-        job.status = "validating"
-        timings = json.loads(job.timings)
-        timings["provider_ms"] = sum(session.scalars(select(GenerationAttempt.latency_ms).where(GenerationAttempt.generation_id == job_id)))
-        job.timings = json.dumps(timings)
+        job.status = VALIDATING
+        update_timings(job, provider_ms=sum(session.scalars(
+            select(GenerationAttempt.latency_ms).where(GenerationAttempt.generation_id == job_id))))
         session.commit()
     start = time.monotonic()
     try:
@@ -216,13 +244,12 @@ def run_job(job_id):
         return
     with LOCK, db.SessionLocal() as session:
         job = session.get(Generation, job_id)
-        job.html, job.status, job.finished_at = document, "ready", utcnow()
-        timings = json.loads(job.timings)
-        timings.update(validation_ms=int((time.monotonic() - start) * 1000), playable_ms=elapsed(job), output_bytes=len(document.encode()))
+        job.html, job.status, job.finished_at = document, READY, utcnow()
+        timings = update_timings(job, validation_ms=int((time.monotonic() - start) * 1000),
+                                 playable_ms=elapsed(job), output_bytes=len(document.encode()))
         if job.details_at:
-            timings["idle_wait_ms"] = max(0, int((job.finished_at - job.details_at).total_seconds() * 1000))
-        job.timings = json.dumps(timings)
-        emit(session, job, "ready", timings["playable_ms"])
+            timings = update_timings(job, idle_wait_ms=since_ms(job.details_at, job.finished_at))
+        emit(session, job, READY, timings["playable_ms"])
         session.commit()
 
 
@@ -233,8 +260,8 @@ class Worker:
 
     def start(self):
         with db.SessionLocal() as session:
-            for job in session.scalars(select(Generation).where(Generation.status.in_(("generating", "validating")))):
-                job.status, job.error, job.finished_at = "failed", "interrupted", utcnow()
+            for job in session.scalars(select(Generation).where(Generation.status.in_((GENERATING, VALIDATING)))):
+                job.status, job.error, job.finished_at = FAILED, "interrupted", utcnow()
                 emit(session, job, "interrupted", elapsed(job))
             session.commit()
         if config.EVOMAP_KEYS:
@@ -248,24 +275,37 @@ class Worker:
         for thread in self.threads:
             thread.join(timeout=1)
 
+    def claim(self):
+        """Move the oldest queued job to generating and return its id."""
+        with db.SessionLocal() as session:
+            # Take SQLite's writer lock before reading, so two workers can
+            # never claim the same job.
+            session.execute(text("BEGIN IMMEDIATE"))
+            job = session.scalar(select(Generation).where(Generation.status == QUEUED).order_by(Generation.created_at))
+            if job is None:
+                session.commit()
+                return None
+            job.status = GENERATING
+            update_timings(job, queue_ms=elapsed(job), max_tokens=config.GENERATION_MAX_TOKENS, prompt_version=1)
+            emit(session, job, "started", elapsed(job))
+            session.commit()
+            return job.id
+
     def loop(self):
         while not self.stop.is_set():
             job_id = None
             try:
-                with LOCK, db.SessionLocal() as session:
-                    session.execute(text("BEGIN IMMEDIATE"))
-                    job = session.scalar(select(Generation).where(Generation.status == "queued").order_by(Generation.created_at))
-                    if job:
-                        job_id = job.id
-                        job.status = "generating"
-                        timing = json.loads(job.timings)
-                        timing.update(queue_ms=elapsed(job), max_tokens=config.GENERATION_MAX_TOKENS, prompt_version=1)
-                        job.timings = json.dumps(timing)
-                        emit(session, job, "started", elapsed(job))
-                    session.commit()
+                job_id = self.claim()
                 if job_id:
                     run_job(job_id)
-            except Exception:
+            except Exception as error:
+                # The traceback goes to the journal; the event log keeps only
+                # the exception type, since a message could echo a key.
+                traceback.print_exc()
+                events.log_event("generation_worker_error", generation_id=job_id, error=type(error).__name__)
                 if job_id:
-                    fail(job_id, "internal_error")
+                    try:
+                        fail(job_id, "internal_error")
+                    except Exception:
+                        traceback.print_exc()
             self.stop.wait(0.25)

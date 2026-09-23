@@ -86,8 +86,14 @@ def publish(
     )
     if commit:
         session.commit()
-        events.alert(f"🆕 新游戏：{work.title}（{owner.slug}，{status}）\n{_game_url(work)}")
+        announce(work, owner)
     return work
+
+
+def announce(work: Work, owner: User) -> None:
+    """Alert the team about a new game. With publish(commit=False), call this
+    after committing, so nothing is announced that could still roll back."""
+    events.alert(f"🆕 新游戏：{work.title}（{owner.slug}，{work.status}）\n{_game_url(work)}")
 
 
 def set_status(session: Session, work: Work, status: str, *, actor: str) -> None:

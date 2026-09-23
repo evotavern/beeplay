@@ -16,8 +16,10 @@ from sqlalchemy.orm import Session
 from app.avatars import avatar
 from app.data import PROFILE_TABS
 from app.db import get_session, init_db
-from app import config, health, ingest
+from app import config, generation, health, ingest
 from app.game_imports import GameImportError, pack_zip, read_zip
+from app.generation_routes import router as generation_router
+from app.identity import current_identity
 from app.models import User
 from app.repository import (
     COOKIE_NAME,
@@ -32,7 +34,6 @@ from app.repository import (
     profile_works,
     record_share,
     record_view,
-    resolve_cookie,
     saved_count,
     saved_works,
     set_like,
@@ -70,22 +71,12 @@ ALLOW_INSECURE_CLAIMS = os.environ.get("BEEPLAY_ALLOW_INSECURE_CLAIMS") == "1"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    from app.generation import Worker
-    worker = Worker()
+    worker = generation.Worker()
     worker.start()
     try:
         yield
     finally:
         worker.close()
-
-
-def current_identity(
-    request: Request, session: Session = Depends(get_session)
-) -> tuple[User | None, str]:
-    """Resolve the claim cookie once per request and stash it for templates."""
-    identity = resolve_cookie(session, request.cookies.get(COOKIE_NAME))
-    request.state.identity = identity
-    return identity
 
 
 def claims_are_secure(request: Request) -> bool:
@@ -519,7 +510,6 @@ def _bounce_to_claim(request: Request, status: str) -> Response:
     return response
 
 
-from app.generation_routes import router as generation_router
 app.include_router(generation_router)
 
 

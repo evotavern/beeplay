@@ -1,4 +1,5 @@
 import json
+import threading
 import time
 import unittest
 import uuid
@@ -7,7 +8,7 @@ from unittest.mock import patch
 
 from sqlalchemy import select
 
-from app import config, db, generation
+from app import config, db, events, generation
 from app.models import Generation, GenerationAttempt, GenerationEvent, GenerationKey, User, Work, utcnow
 import test_http
 
@@ -16,19 +17,18 @@ DETAILS = dict(title="Honey Hop", category="relax", emoji="🐝", art="art-one",
 SUCCESS = (200, {"x-ratelimit-remaining-tokens": "1000"}, {"choices": [{"finish_reason": "stop", "message": {"content": HTML}}], "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}})
 
 
-class GenerationTests(unittest.TestCase):
-    claim = test_http.HttpTests.claim
+class GenerationTests(test_http.HttpTestCase):
     def setUp(self):
         self.worker_patch = patch.object(generation.Worker, "start")
         self.worker_patch.start()
-        test_http.HttpTests.setUp(self)
+        super().setUp()
         self.keys_patch = patch.object(config, "EVOMAP_KEYS", ("test-key-one", "test-key-two"))
         self.keys_patch.start()
         self.claim()
 
     def tearDown(self):
         self.keys_patch.stop()
-        test_http.HttpTests.tearDown(self)
+        super().tearDown()
         self.worker_patch.stop()
 
     def submit(self, **kwargs):
@@ -44,33 +44,46 @@ class GenerationTests(unittest.TestCase):
             generation.run_job(id)
         return self.client.get(f"/api/generations/{id}").json()
 
-    def test_complete_flow_details_during_generation_preview_then_publish_once(self):
+    def ready_job(self):
+        """A generated game whose details were filled in while it generated."""
         response = self.submit()
         self.assertEqual(response.status_code, 202, response.text)
         id = response.json()["id"]
         self.assertEqual(self.client.put(f"/api/generations/{id}/details", json=DETAILS).status_code, 200)
-        ready = self.run_job(id)
-        self.assertEqual(ready["status"], "ready")
-        self.assertIn("playable_ms", ready["timings"])
-        self.assertIn("idle_wait_ms", ready["timings"])
+        self.assertEqual(self.run_job(id)["status"], "ready")
+        return id
+
+    def playtest(self, id):
+        for kind in ("playtest_opened", "playtest_loaded", "playtest_closed"):
+            self.assertEqual(self.client.post(f"/api/generations/{id}/events", json={"kind": kind, "elapsed_ms": 100}).status_code, 204)
+
+    def test_details_entered_during_generation_are_kept_and_timed(self):
+        id = self.ready_job()
+        job = self.client.get("/api/generations/current").json()["job"]
+        self.assertEqual(job["id"], id)
+        self.assertFalse(job["active"])
+        self.assertEqual(job["details"]["title"], "Honey Hop")
+        self.assertIn("playable_ms", job["timings"])
+        self.assertIn("idle_wait_ms", job["timings"])
         self.assertNotIn("Honey Hop", self.client.get("/").text)
-        self.assertEqual(self.client.get("/api/generations/current").json()["job"]["details"]["title"], "Honey Hop")
-        preview = self.client.get(f"/api/generations/{id}/preview")
+
+    def test_preview_is_sandboxed_and_not_cached(self):
+        preview = self.client.get(f"/api/generations/{self.ready_job()}/preview")
         self.assertEqual(preview.status_code, 200)
         self.assertIn("sandbox allow-scripts", preview.headers["content-security-policy"])
         self.assertEqual(preview.headers["cache-control"], "no-store")
+
+    def test_publish_requires_a_playtest_then_happens_and_alerts_once(self):
+        id = self.ready_job()
         self.assertEqual(self.client.post(f"/api/generations/{id}/publish", json=DETAILS).status_code, 409)
-        for kind in ("playtest_opened", "playtest_loaded", "playtest_closed"):
-            self.assertEqual(self.client.post(f"/api/generations/{id}/events", json={"kind": kind, "elapsed_ms": 100}).status_code, 204)
-        first = self.client.post(f"/api/generations/{id}/publish", json=DETAILS)
-        second = self.client.post(f"/api/generations/{id}/publish", json=DETAILS)
+        self.playtest(id)
+        with patch.object(events, "alert") as alert:
+            first = self.client.post(f"/api/generations/{id}/publish", json=DETAILS)
+            second = self.client.post(f"/api/generations/{id}/publish", json=DETAILS)
+        self.assertEqual(first.status_code, 200, first.text)
         self.assertEqual(first.json(), second.json())
-        self.assertIn("Honey Hop", self.client.get("/").text)
-        work_id = first.json()["work_id"]
-        self.assertEqual(self.client.post(f"/api/works/{work_id}/like", json={"active": True}).json(), {"active": True, "count": 1})
-        self.assertEqual(self.client.post(f"/api/works/{work_id}/save", json={"active": True}).status_code, 200)
-        self.assertIn("Honey Hop", self.client.get("/discover").text)
-        self.assertIn("Honey Hop", self.client.get("/profile?tab=saved").text)
+        alert.assert_called_once()
+        self.assertIn("Honey Hop", alert.call_args.args[0])
         with db.SessionLocal() as session:
             self.assertEqual(len(session.scalars(select(Work).where(Work.title == "Honey Hop")).all()), 1)
             attempt = session.scalar(select(GenerationAttempt))
@@ -78,6 +91,27 @@ class GenerationTests(unittest.TestCase):
             self.assertNotIn("test-key", attempt.key_id)
             kinds = list(session.scalars(select(GenerationEvent.kind).where(GenerationEvent.generation_id == id)))
             self.assertEqual(kinds.count("published"), 1)
+
+    def test_published_game_joins_the_feed_and_social_features(self):
+        id = self.ready_job()
+        self.playtest(id)
+        work_id = self.client.post(f"/api/generations/{id}/publish", json=DETAILS).json()["work_id"]
+        self.assertIn("Honey Hop", self.client.get("/").text)
+        self.assertEqual(self.client.post(f"/api/works/{work_id}/like", json={"active": True}).json(), {"active": True, "count": 1})
+        self.assertEqual(self.client.post(f"/api/works/{work_id}/save", json={"active": True}).status_code, 200)
+        self.assertIn("Honey Hop", self.client.get("/discover").text)
+        self.assertIn("Honey Hop", self.client.get("/profile?tab=saved").text)
+
+    def test_worker_error_is_logged_and_fails_the_job(self):
+        id = self.submit().json()["id"]
+        worker = generation.Worker()
+        with patch.object(generation, "run_job", side_effect=RuntimeError("boom")), \
+                patch("traceback.print_exc"), patch.object(worker.stop, "wait", side_effect=lambda _: worker.stop.set()):
+            worker.loop()
+        with db.SessionLocal() as session:
+            self.assertEqual(session.get(Generation, id).error, "internal_error")
+        self.assertIn("generation_worker_error", config.EVENTS_LOG.read_text())
+        self.assertNotIn("boom", config.EVENTS_LOG.read_text())
 
     def test_submission_idempotence_and_one_active_per_identity(self):
         id = str(uuid.uuid4())
@@ -145,7 +179,6 @@ class GenerationTests(unittest.TestCase):
         id = self.submit().json()["id"]
         self.client.put(f"/api/generations/{id}/details", json=DETAILS)
         worker = generation.Worker()
-        import threading
         with patch.object(generation, "request_game", return_value=SUCCESS):
             thread = threading.Thread(target=worker.loop)
             thread.start()

@@ -4,6 +4,7 @@ Deployed, these come from /etc/beeplay/beeplay.env; locally everything falls
 back to paths next to the code.
 """
 
+import json
 import os
 from pathlib import Path
 
@@ -37,7 +38,6 @@ CRASH_WINDOW_MIN = int(os.environ.get("BEEPLAY_CRASH_WINDOW_MIN", 30))
 CRASH_RATIO = float(os.environ.get("BEEPLAY_CRASH_RATIO", 0.5))
 
 # One-shot generation. Keys are complete bearer values, supplied only by env.
-import json
 EVOMAP_BASE_URL = os.environ.get("BEEPLAY_EVOMAP_BASE_URL", "https://api.evomap.ai/v1").rstrip("/")
 EVOMAP_MODEL = os.environ.get("BEEPLAY_EVOMAP_MODEL", "evomap-gemini-3.1-pro-preview")
 _evomap_keys = json.loads(os.environ.get("BEEPLAY_EVOMAP_KEYS", "[]"))

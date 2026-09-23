@@ -23,7 +23,9 @@ def game_zip() -> bytes:
     return output.getvalue()
 
 
-class HttpTests(unittest.TestCase):
+class HttpTestCase(unittest.TestCase):
+    """A migrated app on a temporary database, with a claimable test client."""
+
     def setUp(self) -> None:
         self.directory = tempfile.TemporaryDirectory()
         root = Path(self.directory.name)
@@ -57,6 +59,9 @@ class HttpTests(unittest.TestCase):
         response = self.client.post(f"/claim/{slug}?csrf_token={token}", follow_redirects=False)
         self.assertEqual(response.status_code, 303)
 
+
+
+class HttpTests(HttpTestCase):
     def upload(self, **overrides):
         form = {"title": "Block Drop", "category": "brainrot", "emoji": "🧱", "art": "art-two"}
         form.update(overrides)
