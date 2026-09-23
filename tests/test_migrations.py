@@ -86,6 +86,43 @@ class MigrationTests(unittest.TestCase):
         migrate(self.engine)
         self.assertEqual(self.revision(), HEAD_REVISION)
 
+    def test_database_already_at_0004_gains_the_work_indexes_and_keeps_its_likes(self) -> None:
+        # Production ran 0004 before the likes/saves work_id indexes existed.
+        migrate(self.engine, target="0004")
+        with self.engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO works (id, title, author, category, emoji, art,"
+                    " collection, position, artifact_hash, status, created_at)"
+                    " VALUES (1, 'Coffee', 'MOOD', 'relax', '☕', 'art', 'feed', 0,"
+                    " 'af359667cf6a8038', 'live', '2026-09-23 00:00:00')"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO users (id, slug, name, handle, bio, avatar_fill,"
+                    " level, xp, xp_goal, position, claimable)"
+                    " VALUES (1, 'bee-1', 'Bee', '@bee', '', '#000', 1, 0, 10, 0, 1)"
+                )
+            )
+            connection.execute(
+                text("INSERT INTO work_likes VALUES (1, 1, '2026-09-23 00:00:00')")
+            )
+
+        migrate(self.engine)
+
+        self.assertEqual(self.revision(), HEAD_REVISION)
+        self.assert_matches_models()
+        indexes = {
+            table: {index["name"] for index in inspect(self.engine).get_indexes(table)}
+            for table in ("work_likes", "work_saves")
+        }
+        self.assertIn("ix_work_likes_work_id", indexes["work_likes"])
+        self.assertIn("ix_work_saves_work_id", indexes["work_saves"])
+        with self.engine.connect() as connection:
+            likes = connection.execute(text("SELECT count(*) FROM work_likes")).scalar_one()
+        self.assertEqual(likes, 1)
+
     def test_migrating_twice_is_a_no_op(self) -> None:
         migrate(self.engine)
         migrate(self.engine)

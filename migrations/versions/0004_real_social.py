@@ -30,7 +30,6 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.PrimaryKeyConstraint("user_id", "work_id"),
     )
-    op.create_index("ix_work_likes_work_id", "work_likes", ["work_id"])
     op.create_table(
         "work_saves",
         sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
@@ -38,7 +37,6 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.PrimaryKeyConstraint("user_id", "work_id"),
     )
-    op.create_index("ix_work_saves_work_id", "work_saves", ["work_id"])
     op.create_table(
         "work_views",
         sa.Column("id", sa.Integer(), nullable=False),
