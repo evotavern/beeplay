@@ -499,6 +499,15 @@
         // A refusal the app answered is already in the server's log.
         if (!answered) reportUploadFailure(error, httpStatus);
         document.getElementById("importStatus").textContent = error.message;
+        // A 401 has already sent the page to /claim, taking the form with it.
+        if (window.beeplayReport) {
+          window.beeplayReport("shown", error.message, {
+            area: "creation",
+            next: httpStatus === 401 ? "redirected" : "stayed",
+            lost: httpStatus === 401,
+            status: httpStatus || null
+          });
+        }
       })
       .finally(function () { importProgress.hidden = true; })
       .finally(function () { importSubmit.disabled = false; });

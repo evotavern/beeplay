@@ -72,6 +72,7 @@ Everything lives in `/var/lib/beeplay`:
 | `failed/<id>.zip` | uploads that failed validation, waiting for an operator |
 | `logs/events.jsonl` | one JSON line per event; the journal has the same lines |
 | `logs/ux-last-run` | when `beeplay-ops ux` last ran |
+| `logs/person-key` | secret behind the anonymous person ids in the log; keep it private |
 
 ## Operating the event
 
@@ -93,7 +94,7 @@ loaded after 10 s, or throws in its first 30 s. The thresholds are in
 `/etc/beeplay/beeplay.env`. Crash reports are unauthenticated: if fake reports
 hide a good game, `beeplay-ops status <id> live`.
 
-What players ran into since the last check, by area and then by browser:
+What players ran into since the last check, by area and then by person:
 
 ```bash
 beeplay-ops ux                    # since the last check, then records this one
@@ -102,16 +103,26 @@ beeplay-ops ux --since 2h --no-mark
 ```
 
 It reads `http_error` (every 4xx/5xx the app answered), `client_error` (what
-the page's own reporter, `assets/js/page-reporter.js`, caught: script errors
-and uploads that never reached the app, e.g. a 413 from the edge proxy) and
-the crash events above. Every area (creation, gameplay, other) is listed in
-full, one entry per browser string, so one player hitting the same wall reads
-as one entry (several people can share a browser string). Each entry has
-`saw (inferred):`, what the page shows for that failure according to the code,
-and "in-app only" when every report came from WeChat, QQ, Douyin or another
-in-app browser. A 404/405 is scanner noise, only counted ("noise hidden"),
-unless its event records that the request carried a BeePlay cookie; the app
-does not record that yet, so for now every 404/405 is noise.
+the page's own reporter, `assets/js/page-reporter.js`, caught: script errors,
+uploads that never reached the app, e.g. a 413 from the edge proxy, and
+`shown` reports of the message a failure put on screen) and the crash events
+above. Every area (creation, gameplay, other) is listed in full, one entry per
+person, with:
+
+- an outcome: `STUCK` (failed more than once, no success since), `NO SUCCESS
+  SINCE`, or `RECOVERED` (a `creation_ok` or `play_ok` after the last failure);
+  stuck players come first;
+- `saw:` what the page showed and whether the player was sent away or lost
+  their input, or `saw (inferred):` where the page does not report it yet;
+- the claimed identity when there was one; "in-app only" means every report
+  came from WeChat, QQ, Douyin or another in-app browser.
+
+A person is `p-` plus a hash of IP and User-Agent keyed with
+`/var/lib/beeplay/logs/person-key` and the UTC date: the same player all day,
+unlinkable across days, and the IP itself is never logged. Events from before
+person ids existed are grouped by browser string, marked as such, and have no
+outcome. 404/405s from requests without a BeePlay cookie are scanners: only
+their number is shown ("noise hidden").
 
 Tracing one game or one uploader:
 

@@ -19,7 +19,7 @@ from starlette.concurrency import run_in_threadpool
 from app.avatars import avatar
 from app.data import PROFILE_TABS
 from app.db import get_session, init_db
-from app import browsers, config, events, generation, health, ingest
+from app import browsers, config, events, generation, health, ingest, people, ux
 from app.game_imports import GameImportError, pack_zip, read_zip
 from app.generation_routes import router as generation_router
 from app.identity import current_identity
@@ -131,12 +131,18 @@ async def log_failed_requests(request: Request, call_next) -> Response:
     except Exception as error:
         await run_in_threadpool(
             events.log_event, "http_error", **where, status=500,
-            error=repr(error)[:500], **client,
+            error=repr(error)[:500], **client, **people.fields(request),
         )
         raise
     if response.status_code >= 400:
         await run_in_threadpool(
-            events.log_event, "http_error", **where, status=response.status_code, **client
+            events.log_event, "http_error", **where, status=response.status_code,
+            **client, **people.fields(request),
+        )
+    elif ux.is_creation_success(request.method, request.url.path):
+        # Lets the check tell a player who got through from one still stuck.
+        await run_in_threadpool(
+            events.log_event, "creation_ok", **where, **client, **people.fields(request)
         )
     return response
 
@@ -543,6 +549,7 @@ def game_health(
             elapsed_ms=report.elapsed_ms,
             detail=report.detail,
             user_agent=request.headers.get("user-agent"),
+            person=people.fields(request),
         )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -552,8 +559,14 @@ def game_health(
 class ClientError(BaseModel):
     """A failure the page itself saw; sent by assets/js/page-reporter.js."""
 
-    kind: Literal["error", "rejection", "script", "upload"]
+    # "shown" is not a failure of its own: it records the message a failure
+    # put in front of the player and what happened to them next.
+    kind: Literal["error", "rejection", "script", "upload", "shown"]
     message: str = Field(max_length=1000)
+    area: Literal["creation", "gameplay"] | None = None
+    next: Literal["stayed", "redirected", "closed"] | None = None
+    lost: bool | None = None
+    status: int | None = None
     page: str | None = Field(default=None, max_length=300)
     source: str | None = Field(default=None, max_length=500)
     line: int | None = None
@@ -573,6 +586,7 @@ def client_error(report: ClientError, request: Request) -> Response:
         "client_error",
         **report.model_dump(exclude_none=True),
         **browsers.fields(request.headers.get("user-agent")),
+        **people.fields(request),
     )
     return Response(status_code=204)
 

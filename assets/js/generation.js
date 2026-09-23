@@ -42,11 +42,18 @@
   function root() { return el("createView"); }
   function active() { return !!job && job.active; }
 
+  function reportShown(text) {
+    if (window.beeplayReport) {
+      window.beeplayReport("shown", text, { area: "creation", next: "stayed", lost: false });
+    }
+  }
+
   function message(text, error) {
     var status = el("generationStatus");
     if (!status) return;
     status.textContent = text;
     status.dataset.error = error ? "true" : "false";
+    if (error) reportShown(text);
   }
 
   function saveNote(text) {
@@ -254,6 +261,11 @@
     overlay.querySelector(".generation-playtest-message").textContent = text;
   }
 
+  function previewProblem(text) {
+    previewMessage(text);
+    reportShown(text);
+  }
+
   async function play() {
     if (!job || job.status !== "ready" || !el("generationDetails").reportValidity()) return;
     try {
@@ -279,7 +291,7 @@
 
     signal("playtest_opened", 0).catch(function () {});
     loadTimer = setTimeout(function () {
-      previewMessage("加载时间有点长，可以返回后再次试玩。");
+      previewProblem("加载时间有点长，可以返回后再次试玩。");
       signal("playtest_timeout", performance.now() - previewStart).catch(function () {});
     }, 15000);
     setInert(".app-shell", true);
@@ -312,7 +324,7 @@
       render();
       window.location.href = "/";
     } catch (error) {
-      previewMessage(error.message);
+      previewProblem(error.message);
       button.disabled = false;
     }
   }
@@ -328,10 +340,10 @@
         if (previewJob !== id || !frame) return;
         overlay.querySelector(".generation-publish").disabled = false;
         previewMessage("试试操作、得分和重新开始。满意后再发布。");
-      }).catch(function (error) { previewMessage(error.message); });
+      }).catch(function (error) { previewProblem(error.message); });
     } else if (kind === "error") {
       signal("playtest_error", performance.now() - previewStart).catch(function () {});
-      previewMessage("游戏报告了运行错误。建议返回检查，或重新创作。");
+      previewProblem("游戏报告了运行错误。建议返回检查，或重新创作。");
     }
   });
 

@@ -10,7 +10,7 @@ ssh evotavern beeplay-ops ux --every 60
 ```
 
 It lists what players ran into since the last check, by area and then by
-browser, with what the page showed them.
+person, stuck players first, with what each one saw.
 Game creation and gameplay are in scope, including anything that fails only in
 in-app browsers (WeChat, QQ, Douyin). Everything else is only counted. How the
 command works: `deploy/README.md`, "Operating the event".

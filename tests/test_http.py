@@ -212,6 +212,49 @@ class HttpTests(HttpTestCase):
         self.assertEqual(errors[0]["ua"], WECHAT)
         self.assertNotIn("secret-token", config.EVENTS_LOG.read_text())
 
+    def test_failures_and_creations_carry_a_person_but_never_the_ip(self) -> None:
+        # The test client's IP is "testclient"; a real browser string keeps
+        # that name out of the log unless the IP itself is written.
+        browser = {"User-Agent": WECHAT}
+        self.assertEqual(self.client.get("/.env", headers=browser).status_code, 404)
+        self.claim()
+        self.assertEqual(self.upload(headers=browser, title="").status_code, 422)
+        self.assertEqual(self.upload(headers=browser).status_code, 200)
+
+        scanner, rejected = self.logged("http_error")
+        self.assertFalse(scanner["cookie"])
+        self.assertNotIn("who", scanner)
+        self.assertTrue(rejected["cookie"])
+        self.assertEqual(rejected["who"], "bee-2")
+        [created] = self.logged("creation_ok")
+        self.assertEqual(created["path"], "/api/import-game")
+        self.assertRegex(created["person"], r"^p-[0-9a-f]{8}$")
+        self.assertEqual({scanner["person"], rejected["person"], created["person"]}, {created["person"]})
+        self.assertNotIn("testclient", config.EVENTS_LOG.read_text())
+
+    def test_the_message_a_failure_showed_is_logged_for_the_check(self) -> None:
+        reply = self.client.post("/api/client-error", json={
+            "kind": "shown", "message": "先认领一个身份，再上传游戏吧", "page": "/",
+            "area": "creation", "next": "redirected", "lost": True, "status": 401,
+        })
+        self.assertEqual(reply.status_code, 204)
+        [shown] = self.logged("client_error")
+        self.assertEqual(
+            (shown["kind"], shown["area"], shown["next"], shown["lost"], shown["status"]),
+            ("shown", "creation", "redirected", True, 401),
+        )
+        self.assertIn("person", shown)
+
+    def test_a_game_that_loads_is_logged_as_a_play_for_the_player(self) -> None:
+        for kind in ("start", "loaded"):
+            reply = self.client.post("/api/game-health", json={
+                "artifact": "af359667cf6a8038", "session": "play-1", "kind": kind,
+            })
+            self.assertEqual(reply.status_code, 204)
+        [play] = self.logged("play_ok")
+        self.assertIn("person", play)
+        self.assertIsNotNone(play["work_id"])
+
     def test_a_crashing_request_is_logged_as_a_500(self) -> None:
         crashing = TestClient(main.app, raise_server_exceptions=False)
         with patch.object(main, "feed_games", side_effect=RuntimeError("boom")):

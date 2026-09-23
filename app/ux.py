@@ -2,11 +2,11 @@
 
 Reads the failure events in events.jsonl (http_error, client_error from the
 page reporter, and health_fail from the game reporter) and groups them by area
-and then by browser string, so one player stuck in a loop reads as one finding
-rather than a pile of requests (several people can share a browser string).
-Each finding says what the page shows for it, as far as the code tells.
-404/405s from requests without a BeePlay cookie are scanners: counted, never
-listed; an event that does not say whether it had one counts as a scanner.
+and then by person (app/people.py), so one player stuck in a loop reads as one
+finding rather than a pile of requests. Each person gets an outcome from the
+success events (creation_ok, play_ok) and, where the page reported it, the
+message the failure put in front of them. 404/405s from requests without a
+BeePlay cookie are scanners: counted, never listed.
 """
 
 import hashlib
@@ -24,28 +24,57 @@ AREAS = ("creation", "gameplay", "other")
 DEFAULT_WINDOW = timedelta(hours=24)
 NOISE_STATUSES = {404, 405}
 
+STUCK = "stuck"
+OPEN = "no success since"
+RECOVERED = "recovered"
+UNKNOWN = "outcome unknown"
+_OUTCOME_ORDER = {STUCK: 0, OPEN: 1, RECOVERED: 2, UNKNOWN: 3}
+_LEGACY = "ua-"
+
 _ID_SEGMENT = re.compile(r"/\d+(?=/|$)")
+_PUBLISH = re.compile(r"/api/generations/[^/]+/publish")
+_NEXT = {"stayed": "stayed on the page", "redirected": "sent to another page", "closed": "dialog closed"}
 
 
 def is_creation_path(path: str) -> bool:
     return path.startswith(("/api/import-game", "/api/generations")) or path == "/create"
 
 
+def is_creation_success(method: str, path: str) -> bool:
+    return method == "POST" and (path == "/api/import-game" or bool(_PUBLISH.fullmatch(path)))
+
+
 @dataclass
 class Source:
-    """One entry in the report: a browser string that hit failures in an area."""
+    """One entry in the report: a person (or, for old events, a browser string)."""
 
     key: str
     area: str
     failures: Counter = field(default_factory=Counter)
     browsers: Counter = field(default_factory=Counter)
+    who: set = field(default_factory=set)
+    saw: Counter = field(default_factory=Counter)
     inferred: dict = field(default_factory=dict)
     first_at: str | None = None
     last_at: str | None = None
+    last_success_at: str | None = None
 
     @property
     def total(self) -> int:
         return sum(self.failures.values())
+
+    @property
+    def legacy(self) -> bool:
+        """Logged before person ids and success events: grouped by browser only."""
+        return self.key.startswith(_LEGACY)
+
+    @property
+    def outcome(self) -> str:
+        if self.legacy:
+            return UNKNOWN
+        if self.last_success_at and self.last_at and self.last_success_at > self.last_at:
+            return RECOVERED
+        return STUCK if self.total >= 2 else OPEN
 
     @property
     def in_app_only(self) -> bool:
@@ -113,6 +142,8 @@ def _reverse_lines(path: Path, block_size: int = 64 * 1024) -> Iterator[str]:
 
 
 def _is_noise(event: dict) -> bool:
+    # Events logged before `cookie` existed count as noise too: they were
+    # never listed before either.
     return (
         event.get("event") == "http_error"
         and event.get("status") in NOISE_STATUSES
@@ -132,7 +163,7 @@ def _area(event: dict) -> str | None:
         if path.startswith(("/api/game-health", "/games/")):
             return "gameplay"
         return "other"
-    if name == "client_error":
+    if name == "client_error" and event.get("kind") != "shown":
         if event.get("kind") == "upload" or event.get("page") == "/create":
             return "creation"
         # The home page is the game feed: its errors happen around play.
@@ -155,8 +186,11 @@ def _signature(event: dict) -> str:
 
 
 def _source_key(event: dict) -> str:
+    if event.get("person"):
+        return event["person"]
+    # Logged before person ids existed: the browser string is the best proxy.
     fingerprint = event.get("ua") or event.get("browser") or "?"
-    return "ua-" + hashlib.sha256(fingerprint.encode()).hexdigest()[:6]
+    return _LEGACY + hashlib.sha256(fingerprint.encode()).hexdigest()[:6]
 
 
 def _inferred(event: dict) -> str | None:
@@ -176,15 +210,34 @@ def _inferred(event: dict) -> str | None:
     return None
 
 
+def _saw(event: dict) -> str:
+    text = f'"{str(event.get("message", ""))[:160]}"'
+    if event.get("next") in _NEXT:
+        text += f", {_NEXT[event['next']]}"
+    if event.get("lost"):
+        text += ", input lost"
+    return text
+
+
 def summarize(events: list[dict]) -> Summary:
-    """Failures per area, one entry per browser string, most failures first."""
+    """Failures per area, one entry per person: stuck first, then by count."""
     people: dict[tuple[str, str], Source] = {}
+    successes: dict[tuple[str, str], str] = {}
+    shown: dict[tuple[str, str], Counter] = {}
     health_plays: set[tuple] = set()
     noise = 0
     for event in events:
         name = event.get("event")
         key = _source_key(event)
         at = event.get("at")
+        if name in ("creation_ok", "play_ok"):
+            area = "creation" if name == "creation_ok" else "gameplay"
+            successes[(area, key)] = max(successes.get((area, key), ""), at or "")
+            continue
+        if name == "client_error" and event.get("kind") == "shown":
+            area = event.get("area") if event.get("area") in AREAS else "other"
+            shown.setdefault((area, key), Counter())[_saw(event)] += 1
+            continue
         if _is_noise(event):
             noise += 1
             continue
@@ -200,6 +253,8 @@ def summarize(events: list[dict]) -> Summary:
         signature = _signature(event)
         person.failures[signature] += 1
         person.browsers[event.get("browser") or "unknown"] += 1
+        if event.get("who"):
+            person.who.add(event["who"])
         inferred = _inferred(event)
         if inferred:
             person.inferred.setdefault(signature, inferred)
@@ -207,10 +262,12 @@ def summarize(events: list[dict]) -> Summary:
         person.last_at = at or person.last_at
 
     areas: dict[str, list[Source]] = {area: [] for area in AREAS}
-    for (area, _), person in people.items():
+    for (area, key), person in people.items():
+        person.last_success_at = successes.get((area, key))
+        person.saw = shown.get((area, key), Counter())
         areas[area].append(person)
     for area_people in areas.values():
-        area_people.sort(key=lambda person: -person.total)
+        area_people.sort(key=lambda person: (_OUTCOME_ORDER[person.outcome], -person.total))
     return Summary(areas, noise)
 
 
@@ -229,17 +286,24 @@ def _plural(count: int, word: str, plural: str | None = None) -> str:
 
 
 def _render_person(person: Source) -> list[str]:
-    label = ["/".join(name for name, _ in person.browsers.most_common())]
+    label = [person.outcome.upper()]
+    if person.who:
+        label.append(", ".join(sorted(person.who)))
+    label.append("/".join(name for name, _ in person.browsers.most_common()))
     if person.in_app_only:
         label.append("in-app only")
-    label.append(f"{person.key} (one browser string)")
+    label.append(f"{person.key} (before person ids: same browser, maybe several people)"
+                 if person.legacy else person.key)
     if person.first_at and person.last_at:
         label.append(f"{local_time(person.first_at)} → {local_time(person.last_at)}")
     lines = [f"  {' · '.join(label)}"]
     for signature, count in person.failures.most_common():
         lines.append(f"    {count:>3}×  {signature}")
-    for text in dict.fromkeys(person.inferred.values()):
-        lines.append(f"          saw (inferred): {text}")
+    if not person.saw:
+        for text in dict.fromkeys(person.inferred.values()):
+            lines.append(f"          saw (inferred): {text}")
+    for text, count in person.saw.most_common():
+        lines.append(f"          saw: {text}" + (f" (×{count})" if count > 1 else ""))
     return lines
 
 
@@ -250,10 +314,14 @@ def render(
     for area in AREAS:
         area_people = summary.areas[area]
         if area_people:
+            outcomes = Counter(person.outcome for person in area_people)
+            breakdown = ", ".join(
+                f"{outcomes[outcome]} {outcome}" for outcome in _OUTCOME_ORDER if outcomes[outcome]
+            )
             failures = sum(person.total for person in area_people)
             lines.append(
-                f"{area}: {_plural(failures, 'failure')} from "
-                f"{_plural(len(area_people), 'browser string')}"
+                f"{area}: {_plural(len(area_people), 'person', 'people')} ({breakdown}) · "
+                f"{_plural(failures, 'failure')}"
             )
         else:
             lines.append(f"{area}: nothing")
