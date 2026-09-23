@@ -8,19 +8,12 @@ Beeplay 是一个手机端优先的互动游戏与创作产品原型。首页采
 - 首页竖向游戏流和滚动吸附切换
 - 探索、创建、消息、个人四个功能页面
 - Beeplay 品牌 Logo 与吉祥物资源
-- 消息卡片、创建弹窗，以及真实持久化的试玩、点赞、收藏和分享
+- 消息卡片、创建弹窗、点赞、收藏、分享等交互原型
 - 透明底 PNG 图标资源，可用于 Web、小程序和 App
 
 ## 本地预览
 
-原型现在由 FastAPI + Jinja 模板提供服务：
-
-```bash
-uv sync
-uv run uvicorn app.main:app --reload --port 8010
-```
-
-然后访问 http://127.0.0.1:8010/ 。
+直接打开 `index.html` 即可预览当前原型。
 
 如果需要重新生成图标：
 
@@ -32,57 +25,10 @@ npm run icons
 ## 项目结构
 
 ```text
-app/main.py                # FastAPI 应用入口与路由
-app/models.py              # SQLAlchemy 模型
-app/db.py                  # 引擎、SQLite pragma、种子数据写入
-app/repository.py          # 数据查询层
-app/data.py                # 初始种子数据：8 个测试身份与各自的作品
-app/avatars.py             # 单个头像 SVG，按身份换色
-app/templates/base.html    # 页面外壳：顶栏、导航、弹窗
-app/templates/views/       # 视图，由 htmx 换入 #viewport（/claim 除外，它整页加载）
-app/templates/partials/    # 可单独换入的片段（作品网格等）
-app/templates/macros.html  # 作品卡片宏
-assets/js/app.js           # 交互脚本（全部使用事件委托）
-assets/vendor/htmx.min.js  # htmx 2.0.4（本地打包，不用 CDN）
+index.html                 # 当前交互原型
 assets/brand/              # 品牌参考资源
 assets/icons/              # Logo、吉祥物和功能图标
 tools/export-icons.cjs     # 图标导出脚本
-```
-
-## 游戏流
-
-首页只展示数据库 `works` 表中 `collection = 'feed'`、`status = 'live'` 且带有
-`artifact_hash` 的记录。静态游戏文件位于
-`BEEPLAY_GAMES_DIR/<artifact_hash>/index.html`：本地默认是 `./games`，部署时是
-`/var/lib/beeplay/games`。数据库状态是是否展示的唯一事实来源；浏览器的游戏健康
-上报负责发现无法加载或持续崩溃的文件并触发下架。
-
-## 社交数据
-
-- 点赞与收藏要求先领取测试身份；两者都可撤销，并按「身份 + 游戏」唯一保存。
-- 试玩和分享允许匿名参与。每次新挂载游戏记一次试玩；暂停后继续不会重复计数。
-- 分享只在系统分享成功或分享链接确实复制成功后计数。
-- 个人页的喜欢、收藏和历史标签直接读取数据库；作品卡片上的试玩/点赞数也由真实记录聚合。
-- 旧的展示字符串和伪造收藏数由迁移 `0004` 删除，新的社交表从零开始，不影响用户、游戏、健康事件和运营审计。
-- 游戏完成状态暂不猜测。收集十个真实游戏后，再根据它们的实际结束方式定义独立协议并回接。
-
-## 测试身份
-
-黑客松测试者在 `/claim` 领取 8 个预置身份之一。没有账号系统，也没有密码：
-在 HTTPS 连接上提交一张身份卡片，会拿到一个 cookie（`beeplay_user=<slug>.<token>`），个人页随即
-显示这个身份自己的作品。
-
-- 领取是独占的：已被领取的身份显示为灰色，无法再次领取。
-- 闲置两小时后自动释放，不需要任何后台任务；过期只是一次时间比较。
-- 只要还在使用就不会被收回：每次请求都会刷新 `last_seen_at`。
-- 点「切换身份」会立即释放原来的身份，把它放回可领取的池子。
-- 首页、探索和游戏流不需要身份，未领取也能试玩；只有个人页会跳转到 `/claim`。
-- 领取是 POST 请求，并带有 CSRF token；生产环境不会在纯 HTTP 上签发身份 cookie。仅本地开发可设置 `BEEPLAY_ALLOW_INSECURE_CLAIMS=1`。
-
-需要提前清空全部领取状态时：
-
-```bash
-sqlite3 beeplay.db "UPDATE users SET last_seen_at = NULL, claim_token = NULL;"
 ```
 
 ## 团队协作约定
