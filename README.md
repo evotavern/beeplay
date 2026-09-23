@@ -147,4 +147,4 @@ uv run python -c 'from dotenv import load_dotenv; load_dotenv(); from app.ops im
 `idle_wait_ms` 的 p50/p95、失败比例，再调整模型、提示词或输出 token 上限。不要仅追求短输出导致游戏被截断。
 `provider_ms` 是完整非流式响应时间，不是首 token 时间。当前提供真实阶段和耗时，不显示虚假的完成百分比，
 不执行未完成代码，也不做自动多模型竞速。生成 HTML 限制为内联脚本/样式和 data/blob 素材，无外部依赖。
-试玩使用隔离 iframe 和 CSP；`/games/` 的直接访问也加上 sandbox 响应头（部署需更新 Nginx 配置）。
+试玩使用隔离 iframe 和 CSP；`/games/` 的直接访问也加上 sandbox 响应头（生产由 `deploy/beeplay.caddy` 设置，开发时由 FastAPI 设置）。

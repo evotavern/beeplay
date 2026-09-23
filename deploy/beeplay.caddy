@@ -16,6 +16,9 @@ beeplay.top {
 	handle_path /games/* {
 		root * /var/lib/beeplay/games
 		header Cache-Control "public, max-age=31536000, immutable"
+		# Uploaded and generated games are untrusted: run them in an opaque
+		# origin even when opened directly, matching the in-app iframe.
+		header Content-Security-Policy "sandbox allow-scripts"
 		file_server
 	}
 
