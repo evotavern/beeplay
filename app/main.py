@@ -24,7 +24,9 @@ from app.models import User
 from app.repository import (
     COOKIE_NAME,
     all_users,
+    add_comment,
     claim,
+    comments_for_work,
     cookie_value,
     discover_works,
     feed_games,
@@ -38,6 +40,8 @@ from app.repository import (
     saved_count,
     saved_works,
     set_like,
+    set_comment_like,
+    set_follow,
     set_save,
     utcnow,
     viewed_works,
@@ -432,6 +436,10 @@ class SocialToggle(BaseModel):
     active: bool
 
 
+class CommentCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=500)
+
+
 class SocialEvent(BaseModel):
     event_id: str = Field(min_length=8, max_length=64)
 
@@ -472,6 +480,78 @@ def update_save(
     except LookupError as error:
         raise _social_not_found(error) from error
     return {"active": active}
+
+
+@app.post("/api/users/{user_id}/follow")
+def update_follow(
+    user_id: int,
+    change: SocialToggle,
+    request: Request,
+    session: Session = Depends(get_session),
+) -> dict:
+    user, _ = request.state.identity
+    if user is None:
+        raise HTTPException(status_code=401, detail="先选择你的测试身份")
+    try:
+        active = set_follow(session, user, user_id, change.active)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return {"active": active}
+
+
+@app.get("/api/works/{work_id}/comments")
+def get_comments(
+    work_id: int, request: Request, session: Session = Depends(get_session)
+) -> dict:
+    user, _ = request.state.identity
+    try:
+        comments = comments_for_work(session, user, work_id)
+    except LookupError as error:
+        raise _social_not_found(error) from error
+    return {"comments": comments}
+
+
+@app.post("/api/works/{work_id}/comments", status_code=201)
+def create_comment(
+    work_id: int,
+    payload: CommentCreate,
+    request: Request,
+    session: Session = Depends(get_session),
+) -> dict:
+    user, _ = request.state.identity
+    if user is None:
+        raise HTTPException(status_code=401, detail="先选择你的测试身份")
+    if not payload.content.strip():
+        raise HTTPException(status_code=422, detail="评论不能为空")
+    try:
+        comment = add_comment(session, user, work_id, payload.content)
+    except LookupError as error:
+        raise _social_not_found(error) from error
+    return {
+        "id": comment.id,
+        "author": user.name,
+        "avatar": user.avatar_fill,
+        "content": comment.content,
+        "likes": 0,
+        "liked": False,
+    }
+
+
+@app.post("/api/comments/{comment_id}/like")
+def update_comment_like(
+    comment_id: int,
+    change: SocialToggle,
+    request: Request,
+    session: Session = Depends(get_session),
+) -> dict:
+    user, _ = request.state.identity
+    if user is None:
+        raise HTTPException(status_code=401, detail="先选择你的测试身份")
+    try:
+        active, count = set_comment_like(session, user, comment_id, change.active)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return {"active": active, "count": count}
 
 
 @app.post("/api/works/{work_id}/view")

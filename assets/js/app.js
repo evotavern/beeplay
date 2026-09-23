@@ -151,10 +151,11 @@
     var cards = [].slice.call(document.querySelectorAll(".game-card"));
     if (!feed || !cards.length) return;
     var currentIndex = Math.max(0, cards.findIndex(function (card) {
-      return Math.abs(card.getBoundingClientRect().top - feed.getBoundingClientRect().top) < 40;
+      return Math.abs(card.offsetTop - feed.scrollTop) < 40;
     }));
     var nextIndex = Math.min(cards.length - 1, Math.max(0, currentIndex + direction));
-    cards[nextIndex].scrollIntoView({ behavior: "smooth", block: "start" });
+    feed.scrollTo({ top: cards[nextIndex].offsetTop, behavior: "smooth" });
+    activateInlineGame(cards[nextIndex]);
   }
 
   function scrollToSharedGame() {
@@ -162,7 +163,10 @@
     var artifact = new URLSearchParams(window.location.search).get("game");
     if (!artifact) return;
     var card = document.querySelector('.game-card[data-artifact="' + CSS.escape(artifact) + '"]');
-    if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (card) {
+      document.getElementById("homeFeed").scrollTo({ top: card.offsetTop });
+      activateInlineGame(card);
+    }
   }
 
   function interactionId() {
@@ -257,8 +261,8 @@
   }
 
   document.addEventListener("wheel", function (event) {
-    if (!event.target.closest || !event.target.closest(".home-feed")) return;
-    if (Math.abs(event.deltaY) < 8 || feedWheelLocked || gamePlaying()) return;
+    if (!event.target.closest || !event.target.closest("[data-feed-swipe]")) return;
+    if (Math.abs(event.deltaY) < 8 || feedWheelLocked) return;
     event.preventDefault();
     feedWheelLocked = true;
     moveFeed(event.deltaY > 0 ? 1 : -1);
@@ -275,13 +279,19 @@
       var gameCard = gameAction.closest(".game-card");
       var title = (gameCard && gameCard.dataset.gameTitle) || "这个游戏";
       var action = gameAction.dataset.gameAction;
-      if (action === "play") {
-        togglePlay(gameCard, gameAction, title);
-      } else if (action === "like" || action === "save") {
+      if (action === "like" || action === "save") {
         updateToggle(gameAction, gameCard, action, title);
+      } else if (action === "comments") {
+        openComments(gameCard);
       } else if (action === "share") {
         shareGame(gameAction, gameCard, title);
       }
+      return;
+    }
+
+    var follow = target.closest("[data-follow-user]");
+    if (follow) {
+      updateFollow(follow);
       return;
     }
 
@@ -489,7 +499,6 @@
     if (event.key === "Escape" && modal.classList.contains("open")) closeCreateModal();
     if (modal.classList.contains("open")) return;
     if (currentView() !== "home") return;
-    if (gamePlaying()) return;
     if (event.key === "ArrowDown") { event.preventDefault(); moveFeed(1); }
     if (event.key === "ArrowUp") { event.preventDefault(); moveFeed(-1); }
   });
@@ -563,7 +572,6 @@
     play.healthId = newHealthId();
     play.mountedAt = Date.now();
     play.loaded = false;
-    socialFetch(play.workId, "view", { event_id: play.healthId }).catch(function () {});
     reportHealth(play, "start");
     play.loadTimer = setTimeout(function () {
       if (!play.loaded) reportHealth(play, "timeout", "no load signal after " + loadTimeoutMs + "ms");
@@ -699,6 +707,245 @@
     if (event.key === "Escape" && gamePlaying()) pauseGame();
   });
 
+  // --- fixed inline game feed -----------------------------------------
+  // Games own every gesture inside their iframe. Only the connected lower
+  // tray changes cards, so a game can use vertical swipes without fighting
+  // the feed.
+  var inlinePlays = new WeakMap();
+  var activeInlineCard = null;
+  var audioUnlocked = false;
+
+  function hostMessage(frame, type, extra) {
+    if (!frame || !frame.contentWindow) return;
+    frame.contentWindow.postMessage(Object.assign({ beeplayHost: type }, extra || {}), "*");
+  }
+
+  function activateInlineGame(card) {
+    if (!card || card === activeInlineCard) return;
+    document.querySelectorAll(".game-card").forEach(function (candidate) {
+      var frame = candidate.querySelector(".game-frame");
+      var active = candidate === card;
+      candidate.classList.toggle("active-game", active);
+      hostMessage(frame, active ? "activate" : "deactivate", {
+        muted: !audioUnlocked,
+        transition_ms: 200
+      });
+      if (active) {
+        var play = inlinePlays.get(frame);
+        if (play && !play.started) {
+          play.started = true;
+          play.mountedAt = Date.now();
+          socialFetch(play.workId, "view", { event_id: play.healthId }).catch(function () {});
+          reportHealth(play, "start");
+          play.loadTimer = setTimeout(function () {
+            if (!play.loaded) reportHealth(play, "timeout", "no load signal after " + loadTimeoutMs + "ms");
+          }, loadTimeoutMs);
+        }
+      }
+    });
+    activeInlineCard = card;
+  }
+
+  function initInlineGames() {
+    var cards = [].slice.call(document.querySelectorAll(".game-card"));
+    cards.forEach(function (card) {
+      var frame = card.querySelector(".game-frame");
+      if (!frame || inlinePlays.has(frame)) return;
+      var play = {
+        frame: frame,
+        card: card,
+        hash: card.dataset.artifact,
+        workId: card.dataset.gameId,
+        healthId: interactionId(),
+        mountedAt: 0,
+        started: false,
+        loaded: false
+      };
+      inlinePlays.set(frame, play);
+      frame.addEventListener("load", function () {
+        frame.classList.add("loaded");
+        if (play.started && !play.loaded) {
+          play.loaded = true;
+          clearTimeout(play.loadTimer);
+          reportHealth(play, "loaded");
+        }
+        hostMessage(frame, card === activeInlineCard ? "activate" : "deactivate", {
+          muted: !audioUnlocked,
+          transition_ms: 0
+        });
+      });
+    });
+    if (cards.length) activateInlineGame(cards[0]);
+  }
+
+  window.addEventListener("message", function (event) {
+    var matched = null;
+    document.querySelectorAll(".game-frame").forEach(function (frame) {
+      if (event.source === frame.contentWindow) matched = inlinePlays.get(frame);
+    });
+    if (!matched) return;
+    var data = event.data || {};
+    if (data.beeplay === "loaded" && !matched.loaded) {
+      matched.loaded = true;
+      clearTimeout(matched.loadTimer);
+      reportHealth(matched, "loaded");
+    } else if (data.beeplay === "error") {
+      reportHealth(matched, "error", data.detail);
+    }
+  });
+
+  var swipeStart = null;
+  document.addEventListener("pointerdown", function (event) {
+    var tray = event.target.closest && event.target.closest("[data-feed-swipe]");
+    if (!tray) return;
+    swipeStart = { x: event.clientX, y: event.clientY, tray: tray, pointerId: event.pointerId };
+  });
+  document.addEventListener("pointerup", function (event) {
+    if (!swipeStart || event.pointerId !== swipeStart.pointerId) return;
+    var dy = event.clientY - swipeStart.y;
+    var dx = event.clientX - swipeStart.x;
+    if (Math.abs(dy) > 44 && Math.abs(dy) > Math.abs(dx) * 1.2) {
+      event.preventDefault();
+      audioUnlocked = true;
+      moveFeed(dy < 0 ? 1 : -1);
+    } else if (!audioUnlocked) {
+      audioUnlocked = true;
+      var frame = activeInlineCard && activeInlineCard.querySelector(".game-frame");
+      hostMessage(frame, "activate", { muted: false, transition_ms: 200 });
+    }
+    swipeStart = null;
+  });
+  document.addEventListener("pointercancel", function () { swipeStart = null; });
+
+  // --- persistent follows and comments --------------------------------
+  function updateFollow(button) {
+    if (button.disabled) return;
+    button.disabled = true;
+    var active = !button.classList.contains("following");
+    fetch("/api/users/" + button.dataset.followUser + "/follow", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ active: active })
+    }).then(function (response) {
+      if (response.status === 401) { window.location.href = "/claim"; throw new Error("identity required"); }
+      if (!response.ok) throw new Error("关注没有保存，请重试");
+      return response.json();
+    }).then(function (result) {
+      button.classList.toggle("following", result.active);
+      button.setAttribute("aria-pressed", result.active ? "true" : "false");
+      button.textContent = result.active ? "已关注" : "+ 关注";
+    }).catch(function (error) {
+      if (error.message !== "identity required") showToast(error.message);
+    }).finally(function () { button.disabled = false; });
+  }
+
+  var commentsModal = document.getElementById("commentsModal");
+  var commentsList = document.getElementById("commentsList");
+  var commentInput = document.getElementById("commentInput");
+  var commentsCard = null;
+
+  function commentNode(comment) {
+    var row = document.createElement("article");
+    row.className = "comment-item";
+    var avatar = document.createElement("span");
+    avatar.className = "comment-avatar";
+    avatar.style.background = "#" + String(comment.avatar || "b5d65a").replace(/^#/, "");
+    avatar.textContent = String(comment.author || "?").slice(0, 1);
+    var copy = document.createElement("div");
+    copy.className = "comment-copy";
+    var author = document.createElement("strong");
+    author.textContent = comment.author;
+    var content = document.createElement("p");
+    content.textContent = comment.content;
+    copy.append(author, content);
+    var like = document.createElement("button");
+    like.type = "button";
+    like.className = "comment-like" + (comment.liked ? " active" : "");
+    like.dataset.commentLike = comment.id;
+    like.setAttribute("aria-pressed", comment.liked ? "true" : "false");
+    like.textContent = "♥ " + comment.likes;
+    row.append(avatar, copy, like);
+    return row;
+  }
+
+  function renderComments(comments) {
+    commentsList.replaceChildren();
+    if (!comments.length) {
+      var empty = document.createElement("p");
+      empty.className = "comment-empty";
+      empty.textContent = "还没有评论，来写第一条吧。";
+      commentsList.appendChild(empty);
+      return;
+    }
+    comments.forEach(function (comment) { commentsList.appendChild(commentNode(comment)); });
+  }
+
+  function openComments(card) {
+    commentsCard = card;
+    document.getElementById("commentsTitle").textContent = card.dataset.gameTitle + " · 评论";
+    commentsList.textContent = "正在加载…";
+    commentsModal.classList.add("open");
+    fetch("/api/works/" + card.dataset.gameId + "/comments")
+      .then(function (response) { if (!response.ok) throw new Error(); return response.json(); })
+      .then(function (payload) { renderComments(payload.comments); })
+      .catch(function () { commentsList.textContent = "评论没有加载，请重试。"; });
+  }
+
+  function closeComments() {
+    commentsModal.classList.remove("open");
+    commentsCard = null;
+    commentInput.value = "";
+  }
+
+  document.getElementById("commentsClose").addEventListener("click", closeComments);
+  commentsModal.addEventListener("click", function (event) {
+    if (event.target === commentsModal) closeComments();
+  });
+  document.getElementById("commentForm").addEventListener("submit", function (event) {
+    event.preventDefault();
+    if (!commentsCard || !commentInput.value.trim()) return;
+    fetch("/api/works/" + commentsCard.dataset.gameId + "/comments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: commentInput.value.trim() })
+    }).then(function (response) {
+      if (response.status === 401) { window.location.href = "/claim"; throw new Error("identity required"); }
+      if (!response.ok) throw new Error("评论没有保存，请重试");
+      return response.json();
+    }).then(function (comment) {
+      var empty = commentsList.querySelector(".comment-empty");
+      if (empty) empty.remove();
+      commentsList.appendChild(commentNode(comment));
+      commentInput.value = "";
+      var count = commentsCard.querySelector("[data-social-count='comments']");
+      if (count) count.textContent = String(Number(count.textContent || 0) + 1);
+      commentsList.scrollTop = commentsList.scrollHeight;
+    }).catch(function (error) {
+      if (error.message !== "identity required") showToast(error.message);
+    });
+  });
+  document.addEventListener("click", function (event) {
+    var button = event.target.closest && event.target.closest("[data-comment-like]");
+    if (!button) return;
+    var active = !button.classList.contains("active");
+    fetch("/api/comments/" + button.dataset.commentLike + "/like", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ active: active })
+    }).then(function (response) {
+      if (response.status === 401) { window.location.href = "/claim"; throw new Error("identity required"); }
+      return response.json();
+    }).then(function (result) {
+      button.classList.toggle("active", result.active);
+      button.setAttribute("aria-pressed", result.active ? "true" : "false");
+      button.textContent = "♥ " + result.count;
+    });
+  });
+
+  document.body.addEventListener("htmx:afterSwap", function (event) {
+    if (event.detail.target.id === "viewport") initInlineGames();
+  });
+
   syncChrome();
   scrollToSharedGame();
+  initInlineGames();
 })();

@@ -8,8 +8,11 @@ from sqlalchemy.orm import Session
 
 from app.data import CATEGORIES
 from app.models import (
+    CommentLike,
     User,
+    UserFollow,
     Work,
+    WorkComment,
     WorkLike,
     WorkSave,
     WorkShare,
@@ -49,8 +52,10 @@ def _with_social_state(
     views = counts(WorkView)
     likes = counts(WorkLike)
     shares = counts(WorkShare)
+    comments = counts(WorkComment)
     liked: set[int] = set()
     saved: set[int] = set()
+    followed: set[int] = set()
     if viewer is not None:
         liked = set(
             session.scalars(
@@ -66,13 +71,24 @@ def _with_social_state(
                 )
             )
         )
+        owner_ids = {work.user_id for work in works if work.user_id is not None}
+        followed = set(
+            session.scalars(
+                select(UserFollow.followed_id).where(
+                    UserFollow.follower_id == viewer.id,
+                    UserFollow.followed_id.in_(owner_ids),
+                )
+            )
+        ) if owner_ids else set()
 
     for work in works:
         work.view_count = views.get(work.id, 0)
         work.like_count = likes.get(work.id, 0)
         work.share_count = shares.get(work.id, 0)
+        work.comment_count = comments.get(work.id, 0)
         work.liked_by_viewer = work.id in liked
         work.saved_by_viewer = work.id in saved
+        work.followed_by_viewer = work.user_id in followed
     return works
 
 
@@ -210,6 +226,89 @@ def set_like(session: Session, user: User, work_id: int, active: bool) -> tuple[
 def set_save(session: Session, user: User, work_id: int, active: bool) -> bool:
     _set_membership(session, WorkSave, user, work_id, active)
     return active
+
+
+def set_follow(session: Session, user: User, followed_id: int, active: bool) -> bool:
+    followed = session.get(User, followed_id)
+    if followed is None or followed.id == user.id:
+        raise LookupError("user not found")
+    if active:
+        session.execute(
+            sqlite_insert(UserFollow)
+            .values(follower_id=user.id, followed_id=followed.id, created_at=utcnow())
+            .on_conflict_do_nothing()
+        )
+    else:
+        session.execute(
+            delete(UserFollow).where(
+                UserFollow.follower_id == user.id, UserFollow.followed_id == followed.id
+            )
+        )
+    session.commit()
+    return active
+
+
+def comments_for_work(session: Session, viewer: User | None, work_id: int) -> list[dict]:
+    if _live_work(session, work_id) is None:
+        raise LookupError("work not found")
+    rows = session.execute(
+        select(WorkComment, User)
+        .join(User, User.id == WorkComment.user_id)
+        .where(WorkComment.work_id == work_id)
+        .order_by(WorkComment.created_at.asc(), WorkComment.id.asc())
+    ).all()
+    comment_ids = [comment.id for comment, _ in rows]
+    counts = dict(session.execute(
+        select(CommentLike.comment_id, func.count())
+        .where(CommentLike.comment_id.in_(comment_ids))
+        .group_by(CommentLike.comment_id)
+    ).all()) if comment_ids else {}
+    liked = set(session.scalars(
+        select(CommentLike.comment_id).where(
+            CommentLike.user_id == viewer.id, CommentLike.comment_id.in_(comment_ids)
+        )
+    )) if viewer is not None and comment_ids else set()
+    return [{
+        "id": comment.id,
+        "author": author.name,
+        "avatar": author.avatar_fill,
+        "content": comment.content,
+        "likes": counts.get(comment.id, 0),
+        "liked": comment.id in liked,
+    } for comment, author in rows]
+
+
+def add_comment(session: Session, user: User, work_id: int, content: str) -> WorkComment:
+    if _live_work(session, work_id) is None:
+        raise LookupError("work not found")
+    comment = WorkComment(work_id=work_id, user_id=user.id, content=content.strip())
+    session.add(comment)
+    session.commit()
+    session.refresh(comment)
+    return comment
+
+
+def set_comment_like(
+    session: Session, user: User, comment_id: int, active: bool
+) -> tuple[bool, int]:
+    comment = session.get(WorkComment, comment_id)
+    if comment is None or _live_work(session, comment.work_id) is None:
+        raise LookupError("comment not found")
+    if active:
+        session.execute(
+            sqlite_insert(CommentLike)
+            .values(user_id=user.id, comment_id=comment.id, created_at=utcnow())
+            .on_conflict_do_nothing()
+        )
+    else:
+        session.execute(delete(CommentLike).where(
+            CommentLike.user_id == user.id, CommentLike.comment_id == comment.id
+        ))
+    session.commit()
+    count = session.scalar(
+        select(func.count()).select_from(CommentLike).where(CommentLike.comment_id == comment.id)
+    )
+    return active, count
 
 
 def record_view(

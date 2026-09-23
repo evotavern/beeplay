@@ -24,5 +24,24 @@
     var reason = event.reason;
     send("error", "unhandled rejection: " + (reason && reason.message ? reason.message : reason));
   });
+  // Host lifecycle contract. Generated games can listen for the same
+  // beeplayHost messages for richer pause/resume behavior; this fallback
+  // handles ordinary media in imported games.
+  window.addEventListener("message", function (event) {
+    var data = event.data || {};
+    if (!data.beeplayHost) return;
+    try {
+      document.querySelectorAll("audio, video").forEach(function (media) {
+        if (data.beeplayHost === "deactivate") {
+          media.dataset.beeplayWasPlaying = media.paused ? "0" : "1";
+          media.pause();
+        } else if (data.beeplayHost === "activate") {
+          media.muted = !!data.muted;
+          if (media.dataset.beeplayWasPlaying !== "0") media.play().catch(function () {});
+        }
+      });
+      window.dispatchEvent(new CustomEvent("beeplay:lifecycle", { detail: data }));
+    } catch (ignored) {}
+  });
   window.addEventListener("load", function () { send("loaded"); });
 })();

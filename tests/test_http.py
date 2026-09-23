@@ -14,7 +14,10 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app import config, db, events, main
-from app.models import HealthEvent, Work, WorkLike, WorkSave, WorkShare, WorkView
+from app.models import (
+    CommentLike, HealthEvent, UserFollow, Work, WorkComment,
+    WorkLike, WorkSave, WorkShare, WorkView,
+)
 
 
 WECHAT = (
@@ -185,6 +188,37 @@ class HttpTests(unittest.TestCase):
             save = self.client.post(f"/api/works/{work_id}/save", json={"active": active})
             self.assertEqual(save.status_code, 200)
             self.assertEqual(save.json(), {"active": active})
+
+    def test_follows_comments_and_comment_likes_persist_for_claimed_users(self) -> None:
+        with Session(self.engine) as session:
+            work = session.scalar(select(Work).where(Work.artifact_hash == "af359667cf6a8038"))
+        self.assertEqual(self.client.get(f"/api/works/{work.id}/comments").json(), {"comments": []})
+        self.assertEqual(
+            self.client.post(f"/api/works/{work.id}/comments", json={"content": "好玩"}).status_code,
+            401,
+        )
+        self.claim()
+        follow = self.client.post(f"/api/users/{work.user_id}/follow", json={"active": True})
+        self.assertEqual(follow.json(), {"active": True})
+        created = self.client.post(
+            f"/api/works/{work.id}/comments", json={"content": "  好玩  "}
+        )
+        self.assertEqual(created.status_code, 201)
+        comment = created.json()
+        self.assertEqual(comment["content"], "好玩")
+        liked = self.client.post(
+            f"/api/comments/{comment['id']}/like", json={"active": True}
+        )
+        self.assertEqual(liked.json(), {"active": True, "count": 1})
+        listed = self.client.get(f"/api/works/{work.id}/comments").json()["comments"]
+        self.assertEqual((listed[0]["content"], listed[0]["likes"], listed[0]["liked"]), ("好玩", 1, True))
+        home = self.client.get("/").text
+        self.assertIn('class="follow-author following"', home)
+        self.assertIn('data-social-count="comments">1</small>', home)
+        with Session(self.engine) as session:
+            self.assertEqual(session.query(UserFollow).count(), 1)
+            self.assertEqual(session.query(WorkComment).count(), 1)
+            self.assertEqual(session.query(CommentLike).count(), 1)
 
     def logged(self, event: str) -> list[dict]:
         if not config.EVENTS_LOG.exists():
