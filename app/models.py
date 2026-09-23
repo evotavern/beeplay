@@ -166,3 +166,53 @@ class FailedUpload(Base):
     resolved_work_id: Mapped[int | None] = mapped_column(
         ForeignKey("works.id"), default=None
     )
+
+
+class Generation(Base):
+    __tablename__ = "generations"
+    id: Mapped[str] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    claim_hash: Mapped[str]
+    prompt: Mapped[str] = mapped_column(Text)
+    model: Mapped[str]
+    status: Mapped[str] = mapped_column(default="queued", index=True)
+    details: Mapped[str] = mapped_column(Text, default="{}")
+    html: Mapped[str | None] = mapped_column(Text, default=None)
+    error: Mapped[str | None] = mapped_column(default=None)
+    timings: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(default=None)
+    details_at: Mapped[datetime | None] = mapped_column(default=None)
+    playtest_at: Mapped[datetime | None] = mapped_column(default=None)
+    work_id: Mapped[int | None] = mapped_column(ForeignKey("works.id"), default=None)
+
+
+class GenerationEvent(Base):
+    __tablename__ = "generation_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    generation_id: Mapped[str] = mapped_column(ForeignKey("generations.id"), index=True)
+    kind: Mapped[str]
+    elapsed_ms: Mapped[int | None] = mapped_column(default=None)
+    at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class GenerationKey(Base):
+    __tablename__ = "generation_keys"
+    id: Mapped[str] = mapped_column(primary_key=True)
+    disabled: Mapped[bool] = mapped_column(default=False)
+    cooldown_until: Mapped[datetime | None] = mapped_column(default=None)
+    last_used_at: Mapped[datetime | None] = mapped_column(default=None)
+
+
+class GenerationAttempt(Base):
+    __tablename__ = "generation_attempts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    generation_id: Mapped[str] = mapped_column(ForeignKey("generations.id"), index=True)
+    key_id: Mapped[str]
+    model: Mapped[str]
+    status: Mapped[str]
+    http_status: Mapped[int | None] = mapped_column(default=None)
+    latency_ms: Mapped[int] = mapped_column(default=0)
+    usage: Mapped[str] = mapped_column(Text, default="{}")
+    limits: Mapped[str] = mapped_column(Text, default="{}")
+    at: Mapped[datetime] = mapped_column(default=utcnow)

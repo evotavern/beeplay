@@ -62,6 +62,7 @@ def publish(
     entries: list[tuple[str, bytes]],
     actor: str,
     status: str = "live",
+    commit: bool = True,
 ) -> Work:
     """Install a bundle and put it in the feed. Raises GameImportError if broken."""
     artifact = install_folder(entries, config.GAMES_DIR)
@@ -85,8 +86,9 @@ def publish(
         session, work, actor=actor, kind="created",
         after={"status": status, "artifact": artifact, "title": details.title},
     )
-    session.commit()
-    events.alert(f"🆕 新游戏：{work.title}（{owner.slug}，{status}）\n{_game_url(work)}")
+    if commit:
+        session.commit()
+        events.alert(f"🆕 新游戏：{work.title}（{owner.slug}，{status}）\n{_game_url(work)}")
     return work
 
 

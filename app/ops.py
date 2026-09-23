@@ -14,6 +14,9 @@
 SSH access is the only authentication. Every change is audited as ops:<user>.
 """
 
+import json
+import math
+import statistics
 import argparse
 import getpass
 import os
@@ -168,10 +171,67 @@ def cmd_migrate(session: Session, args) -> None:
     print("database is at the latest schema")
 
 
+
+def cmd_generations(session, args):
+    from app.models import Generation, GenerationEvent, GenerationAttempt
+    if args.id:
+        job = session.get(Generation, args.id)
+        if job is None:
+            raise SystemExit("generation not found")
+        print(json.dumps({"id": job.id, "status": job.status, "model": job.model,
+                          "error": job.error, "timings": json.loads(job.timings)}, ensure_ascii=False))
+        for row in session.scalars(select(GenerationEvent).where(GenerationEvent.generation_id == job.id).order_by(GenerationEvent.id)):
+            print(f"{row.at.isoformat()} {row.kind} elapsed_ms={row.elapsed_ms}")
+        for row in session.scalars(select(GenerationAttempt).where(GenerationAttempt.generation_id == job.id)):
+            print(f"key={row.key_id} status={row.http_status} latency_ms={row.latency_ms} usage={row.usage} limits={row.limits}")
+        return
+    jobs = list(session.scalars(select(Generation).order_by(Generation.created_at.desc()).limit(args.limit)))
+    for job in jobs:
+        print(f"{job.id} {job.status:<10} {job.model} {job.timings} error={job.error or '-'}")
+    for model in sorted({job.model for job in jobs}):
+        group = [job for job in jobs if job.model == model]
+        print(f"model={model} samples={len(group)} ready_or_published={sum(job.status in ('ready', 'published') for job in group)} failed={sum(job.status == 'failed' for job in group)}")
+        for metric in ("queue_ms", "provider_ms", "validation_ms", "playable_ms", "details_ms", "idle_wait_ms", "to_playtest_ms"):
+            values = sorted(json.loads(job.timings)[metric] for job in group if metric in json.loads(job.timings))
+            if values:
+                print(f"  {metric}: n={len(values)} p50={statistics.median(values):.0f} p95={values[max(0, math.ceil(len(values)*.95)-1)]}")
+
+
+def cmd_generation_keys(session, args):
+    from app import generation
+    from app.models import GenerationAttempt, GenerationKey
+    configured = {generation.fingerprint(key) for key in config.EVOMAP_KEYS}
+    if args.enable:
+        row = session.get(GenerationKey, args.enable)
+        if row is None:
+            raise SystemExit("key identifier not found")
+        row.disabled, row.cooldown_until = False, None
+        session.commit()
+    for key_id in sorted(configured):
+        row = session.get(GenerationKey, key_id)
+        attempts = list(session.scalars(select(GenerationAttempt).where(GenerationAttempt.key_id == key_id).order_by(GenerationAttempt.id)))
+        tokens = [json.loads(a.usage).get("total_tokens") for a in attempts]
+        print(json.dumps({"key_id": key_id, "disabled": row.disabled if row else False,
+            "cooldown_until": str(row.cooldown_until) if row and row.cooldown_until else None,
+            "requests": len(attempts), "failed": sum(a.status != "ok" for a in attempts),
+            "observed_total_tokens": sum(t for t in tokens if t is not None),
+            "requests_without_token_usage": sum(t is None for t in tokens),
+            "remaining_balance": "unknown",
+            "last_reported_limits": json.loads(attempts[-1].limits) if attempts else {}}, ensure_ascii=False))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="beeplay-ops", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
+
+    generations = commands.add_parser("generations", help="generation speed and playtest funnel")
+    generations.add_argument("--id", help="inspect one generation and its events")
+    generations.add_argument("--limit", type=int, default=100)
+    generations.set_defaults(run=cmd_generations)
+    keys = commands.add_parser("generation-keys", help="observed usage and provider key health")
+    keys.add_argument("--enable", help="re-enable a key by its non-secret identifier")
+    keys.set_defaults(run=cmd_generation_keys)
 
     listing = commands.add_parser("list")
     listing.add_argument("--status", choices=STATUSES)

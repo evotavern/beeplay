@@ -84,3 +84,57 @@ sqlite3 beeplay.db "UPDATE users SET last_seen_at = NULL, claim_token = NULL;"
 - 通过 Pull Request 合并到 `main`
 
 后续接入后端和数据库时，密钥、数据库地址和环境变量不要写入 HTML 或提交到仓库，使用本地 `.env` 和 GitHub Secrets。
+
+## 从想法生成游戏
+
+`/create` 支持一次性生成：输入玩法 → 生成期间填写名称、分类、图标、封面颜色和介绍 → 试玩 → 主动发布。
+仍使用现有的随机身份。草稿绑定本次身份领取；身份被重新领取后，新持有人无法访问旧草稿。
+每个身份最多一个生成任务。任务和草稿存储在 SQLite，刷新可恢复；进程重启会将中断的请求标记失败，不会自动重复扣费。
+
+本地启动（独立工作目录有独立数据库和游戏目录）：
+
+```bash
+cp .env.example .env
+# 编辑 .env，BEEPLAY_EVOMAP_KEYS 是完整 bearer key 的 JSON 数组。
+uv sync
+uv run uvicorn app.main:app --env-file .env --host 127.0.0.1 --port 8021
+```
+
+默认 API 为 `https://api.evomap.ai/v1/chat/completions`，模型为 `evomap-gemini-3.1-pro-preview`。
+`BEEPLAY_EVOMAP_BASE_URL`、`BEEPLAY_EVOMAP_MODEL`、`BEEPLAY_GENERATION_MAX_TOKENS`（默认 8192）、
+`BEEPLAY_GENERATION_TIMEOUT_S`（默认 180）和 `BEEPLAY_GENERATION_WORKERS`（默认 2）均可配置。
+**运行一个 uvicorn 进程，不使用 `--workers`。** 进程内有有界后台线程，网络调用不占用页面请求。
+服务器部署时把同样的环境变量放入现有 `/etc/beeplay/beeplay.env`，不要提交真实密钥。
+
+密钥按最近使用顺序轮换；401/403/402 或明确的 `insufficient_quota`/`quota_exceeded` 会停用该 key，
+普通 429 按 `Retry-After` 冷却。仅明确的这些拒绝会尝试另一个 key，每次任务每个 key 最多一次。
+网络中断或其他服务错误不自动重放，用户可以重新生成。没有配置密钥时页面明确显示不可用。
+额度字段尚无公开验证的 Evomap 契约；不猜测余额接口，不把本地累计使用量当成剩余额度。
+
+### 生成速度与试玩观测
+
+```bash
+uv run python -m app.ops generations
+uv run python -m app.ops generations --id GENERATION_ID
+uv run python -m app.ops generation-keys
+uv run python -m app.ops generation-keys --enable KEY_IDENTIFIER
+```
+
+CLI 使用进程环境变量；本地读取 `.env` 可运行：
+
+```bash
+uv run python -c 'from dotenv import load_dotenv; load_dotenv(); from app.ops import main; main()' generation-keys
+```
+
+本地也可直接运行 `./deploy/local.sh` 启动；更改 `.env` 后重启该进程。
+`generations` 按模型汇总最近 100 个任务（`--limit` 可改）的 p50/p95：排队、完整 provider 响应、验证、
+可试玩、资料填写、填写完成后的空等、进入试玩耗时。每次尝试保留非秘密 key 标识、模型、HTTP 状态、
+响应 token usage（若提供）、允许列表内的 rate-limit headers 和延迟。余额没有被 provider 明确返回时为 unknown。
+试玩记录 opened / loaded / error / timeout / closed（关闭时记录时长）及最终发布，全部关联 generation ID。
+浏览器信号用于产品观测，不能当作可信的游戏质量证明；未上报关闭的会话不推断时长。
+
+初始优化假设：**开始试玩前的准备时间 ≈ max(生成时间, 填写时间)**。先看 `playable_ms` 与
+`idle_wait_ms` 的 p50/p95、失败比例，再调整模型、提示词或输出 token 上限。不要仅追求短输出导致游戏被截断。
+`provider_ms` 是完整非流式响应时间，不是首 token 时间。当前提供真实阶段和耗时，不显示虚假的完成百分比，
+不执行未完成代码，也不做自动多模型竞速。生成 HTML 限制为内联脚本/样式和 data/blob 素材，无外部依赖。
+试玩使用隔离 iframe 和 CSP；`/games/` 的直接访问也加上 sandbox 响应头（部署需更新 Nginx 配置）。

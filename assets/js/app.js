@@ -237,8 +237,7 @@
         showToast("先写下一句想法吧");
         return;
       }
-      showToast("Bee 正在把你的想法变成一个可玩的版本…");
-      setTimeout(function () { showToast("初版完成，马上可以开始试玩"); }, 1700);
+      if (window.BeeGeneration) window.BeeGeneration.start();
       return;
     }
 

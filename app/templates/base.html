@@ -1143,6 +1143,7 @@
     body.playing .bottom-nav,
     body.playing .bottom-spacer { display: none; }
   </style>
+  <link rel="stylesheet" href="{{ asset('css/generation.css') }}">
 </head>
 <body class="mobile-preview{% if view == 'home' %} feed-mode{% endif %}"
       hx-target="#viewport" hx-swap="innerHTML" hx-push-url="true"
@@ -1255,5 +1256,6 @@
 
   <script src="{{ asset('vendor/htmx.min.js') }}"></script>
   <script src="{{ asset('js/app.js') }}"></script>
+  <script src="{{ asset('js/generation.js') }}"></script>
 </body>
 </html>

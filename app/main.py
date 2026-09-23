@@ -62,7 +62,13 @@ ALLOW_INSECURE_CLAIMS = os.environ.get("BEEPLAY_ALLOW_INSECURE_CLAIMS") == "1"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    yield
+    from app.generation import Worker
+    worker = Worker()
+    worker.start()
+    try:
+        yield
+    finally:
+        worker.close()
 
 
 def current_identity(
@@ -99,7 +105,16 @@ app.mount("/assets", StaticFiles(directory=BASE_DIR / "assets"), name="assets")
 
 # Development convenience: in production Nginx serves /games/* straight from
 # disk, so game files never go through uvicorn's threadpool.
-app.mount("/games", StaticFiles(directory=GAMES_DIR), name="games")
+class GameFiles(StaticFiles):
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        # Match the in-app sandbox even when an artifact is opened directly.
+        response.headers["Content-Security-Policy"] = "sandbox allow-scripts"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
+
+
+app.mount("/games", GameFiles(directory=GAMES_DIR), name="games")
 
 @lru_cache
 def asset(path: str) -> str:
@@ -391,4 +406,16 @@ def _bounce_to_claim(request: Request, status: str) -> Response:
     response = redirect(request, target)
     if status == "stolen":
         response.delete_cookie(COOKIE_NAME)
+    return response
+
+
+from app.generation_routes import router as generation_router
+app.include_router(generation_router)
+
+
+@app.middleware("http")
+async def private_generation_responses(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/api/generations"):
+        response.headers["Cache-Control"] = "no-store"
     return response
