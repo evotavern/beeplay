@@ -13,7 +13,8 @@ from sqlalchemy.orm import Session
 from app.avatars import avatar
 from app.data import PROFILE_TABS
 from app.db import get_session, init_db
-from app.game_imports import GameImportError, install_folder, install_zip
+from app import config, ingest
+from app.game_imports import GameImportError, pack_zip, read_zip
 from app.models import User
 from app.repository import (
     COOKIE_NAME,
@@ -27,7 +28,6 @@ from app.repository import (
     profile_works,
     resolve_cookie,
     utcnow,
-    register_imported_game,
     works_count,
 )
 
@@ -37,7 +37,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # in state: ProtectSystem=strict makes the app directory read-only, so the
 # mkdir below would fail at startup against BASE_DIR. Same convention as
 # BEEPLAY_DB_PATH.
-GAMES_DIR = Path(os.environ.get("BEEPLAY_GAMES_DIR", BASE_DIR / "games"))
+GAMES_DIR = config.GAMES_DIR
 # Created at import, not in lifespan: app.mount() constructs StaticFiles
 # immediately and it raises on a missing directory, which happens before any
 # lifespan hook runs. games/ is gitignored, so a fresh checkout has none.
@@ -289,33 +289,58 @@ def profile_works_partial(
 @app.post("/api/import-game", response_class=JSONResponse)
 def import_game(
     title: str = Form(""),
+    category: str = Form(""),
+    emoji: str = Form(""),
+    art: str = Form(""),
+    description: str = Form(""),
     bundle: UploadFile | None = File(None),
     files: list[UploadFile] | None = File(None),
     paths: list[str] | None = Form(None),
     session: Session = Depends(get_session),
+    identity: tuple[User | None, str] = Depends(current_identity),
 ) -> JSONResponse:
-    """Import a finished static game through the existing creator modal."""
+    """Publish a finished static game from the creator modal, live at once.
+
+    A bundle that fails validation is not simply refused: it is kept, the
+    team is alerted, and the uploader is pointed at the hackathon staff.
+    """
+    user, _ = identity
+    if user is None:
+        raise HTTPException(status_code=401, detail="先认领一个身份，再上传游戏吧")
     try:
-        if bundle is not None:
-            artifact = install_zip(bundle.file.read(), GAMES_DIR)
-            fallback_title = Path(bundle.filename or "新小游戏").stem
-        else:
-            uploaded = files or []
-            relative_paths = paths or []
-            if len(uploaded) != len(relative_paths):
-                raise GameImportError("游戏文件路径不完整")
-            artifact = install_folder(
-                [(path, file.file.read()) for file, path in zip(uploaded, relative_paths)],
-                GAMES_DIR,
-            )
-            fallback_title = Path(relative_paths[0]).parts[0] if relative_paths else "新小游戏"
-    except GameImportError as error:
+        details = ingest.validate_details(
+            title=title, category=category, emoji=emoji, art=art, description=description
+        )
+    except ingest.DetailsError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
-    game = register_imported_game(
-        session, artifact_hash=artifact, title=(title.strip() or fallback_title)[:120]
-    )
-    return JSONResponse({"title": game.title, "artifact": artifact})
+    raw_zip: bytes | None = None
+    entries: list[tuple[str, bytes]] = []
+    try:
+        if bundle is not None:
+            raw_zip = bundle.file.read()
+            entries = read_zip(raw_zip)
+        else:
+            uploaded, relative_paths = files or [], paths or []
+            entries = [(path, file.file.read()) for file, path in zip(uploaded, relative_paths)]
+            if len(uploaded) != len(relative_paths):
+                raise GameImportError("游戏文件路径不完整")
+        game = ingest.publish(
+            session, owner=user, details=details, entries=entries, actor=f"user:{user.slug}"
+        )
+    except GameImportError as error:
+        ingest.capture_failure(
+            session,
+            owner=user,
+            details=details,
+            raw_zip=raw_zip if raw_zip is not None else pack_zip(entries),
+            error=str(error),
+        )
+        raise HTTPException(
+            status_code=422,
+            detail=f"这个游戏包有点闹脾气 🐝（{error}）。别慌，去找黑客松工作人员，我们帮你把它送上首页！",
+        ) from error
+    return JSONResponse({"title": game.title, "artifact": game.artifact_hash})
 
 
 def _bounce_to_claim(request: Request, status: str) -> Response:

@@ -287,7 +287,10 @@
     }
     importSubmit.disabled = true;
     var data = new FormData();
-    data.append("title", document.getElementById("importGameTitle").value.trim());
+    ["Title", "Category", "Emoji", "Description"].forEach(function (field) {
+      data.append(field.toLowerCase(), document.getElementById("importGame" + field).value.trim());
+    });
+    data.append("art", importGameForm.querySelector("[name='importGameArt']:checked").value);
     if (importSelection.kind === "zip") {
       data.append("bundle", importSelection.files[0]);
     } else {
@@ -302,6 +305,10 @@
         return response.json().catch(function () {
           throw new Error(response.ok ? "导入失败" : "服务器拒绝了上传，请检查文件大小后重试");
         }).then(function (result) {
+          if (response.status === 401) {
+            window.location.href = "/claim";
+            throw new Error(result.detail);
+          }
           if (!response.ok) throw new Error(result.detail || "导入失败");
           return result;
         });
