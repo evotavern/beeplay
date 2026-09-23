@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Installed as /usr/local/bin/beeplay-ops. Runs the operator CLI as the
+# service user, with the service's environment. `beeplay-ops --help`.
+set -euo pipefail
+set -a
+. /etc/beeplay/beeplay.env
+set +a
+cd /srv/beeplay
+exec sudo --preserve-env -u beeplay /srv/beeplay/.venv/bin/python -m app.ops "$@"

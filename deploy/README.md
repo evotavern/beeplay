@@ -1,96 +1,113 @@
-# Deploying Beeplay with Nginx
+# Deploying Beeplay
 
-This deployment serves Beeplay directly on the server's public IP over HTTP.
-Nginx listens on port 80, serves assets and game artifacts from disk, and
-proxies application requests to uvicorn on `127.0.0.1:8000`.
+Nginx on port 80 serves `/assets/` and `/games/` from disk and proxies
+everything else to uvicorn on `127.0.0.1:8000`. The current server is
+`http://47.251.140.176/` (ssh alias `evotavern`).
 
-## HTTPS is required for tester identities
+## Plain HTTP for now
 
-The identity cookie is a bearer credential. The claim feature deliberately
-refuses to issue it over plain HTTP, so configure TLS and ensure Nginx passes
-`X-Forwarded-Proto: https` before deploying this branch. The current IP-only
-HTTP configuration remains suitable for browsing the prototype but not for
-claiming identities.
+The site runs without TLS. Claim cookies are bearer credentials, so the app
+only issues them over HTTP because `/etc/beeplay/beeplay.env` sets
+`BEEPLAY_ALLOW_INSECURE_CLAIMS=1`. Moving to HTTPS later:
 
-For the current server, open `http://47.251.140.176/` after deployment.
+1. Put TLS in front (Caddy, or certbot with Nginx). Nginx already forwards
+   `X-Forwarded-Proto`, and uvicorn runs with `--proxy-headers`.
+2. In `/etc/beeplay/beeplay.env`, delete `BEEPLAY_ALLOW_INSECURE_CLAIMS=1`
+   and set `BEEPLAY_PUBLIC_URL=https://…`.
+3. `systemctl restart beeplay`. Cookies pick up the `Secure` flag on their
+   own; testers claim again once.
 
-## Install
+## Releasing
 
-Run these commands on the server from a checkout of this branch:
+From a laptop checkout:
 
 ```bash
-# 1. OS packages and service account
-sudo apt-get update
-sudo apt-get install -y curl nginx
-curl -LsSf https://astral.sh/uv/install.sh | sudo env UV_INSTALL_DIR=/usr/local/bin sh
-uv --version
-sudo useradd --system --home /srv/beeplay --shell /usr/sbin/nologin beeplay
-
-# 2. Application code and dependencies
-sudo mkdir -p /srv/beeplay
-sudo rsync -a --delete --exclude '.git' --exclude '.venv' --exclude 'beeplay.db*' --exclude 'games' ./ /srv/beeplay/
-sudo chown -R beeplay:beeplay /srv/beeplay
-sudo chmod -R a+rX /srv/beeplay/assets
-sudo -u beeplay uv sync --project /srv/beeplay --frozen
-
-# 3. Application state and the first playable game
-sudo install -d -o beeplay -g beeplay /var/lib/beeplay/games
-sudo rsync -a /root/beeplay-handoff/af359667cf6a8038/ /var/lib/beeplay/games/af359667cf6a8038/
-sudo chown -R beeplay:beeplay /var/lib/beeplay
-sudo chmod -R a+rX /var/lib/beeplay/games
-
-# 4. FastAPI application
-sudo cp deploy/beeplay.service /etc/systemd/system/beeplay.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now beeplay.service
-
-# 5. Public Nginx listener
-sudo rm -f /etc/nginx/sites-enabled/default
-sudo cp deploy/nginx.conf /etc/nginx/sites-available/beeplay
-sudo ln -sfn /etc/nginx/sites-available/beeplay /etc/nginx/sites-enabled/beeplay
-sudo nginx -t
-sudo systemctl enable --now nginx
-sudo systemctl reload nginx
+deploy/push.sh
 ```
 
-`uv sync` downloads a compatible Python runtime when the host does not
-already have one; Beeplay requires Python 3.12 or newer. Ensure the cloud
-firewall permits inbound TCP port 80.
+This copies the tree to `/root/beeplay-release/` and runs
+`deploy/release.sh` there, which:
 
-The app seeds its own SQLite database at `/var/lib/beeplay/beeplay.db` on
-first startup. The handoff game is listed in that seed data, and is rendered
-only after its `index.html` exists under `/var/lib/beeplay/games`.
+- installs `/etc/beeplay/beeplay.env` if missing (never overwrites it)
+- backs the database up to `/var/backups/beeplay/beeplay-<time>.db`
+- keeps the previous code at `/srv/beeplay.prev`
+- syncs code, installs dependencies, the systemd unit, the Nginx site and
+  `/usr/local/bin/beeplay-ops`
+- stops the app, migrates the schema (`beeplay-ops migrate`), adds the crash
+  reporter to games installed before it existed (`beeplay-ops
+  refresh-reporter`), starts the app
+- waits for HTTP 200 and prints rollback commands if it never comes
 
-Startup is also what migrates a database that predates tester identities: it
-adds `works.user_id` if the column is missing, inserts any of the eight
-identities that are absent, and hands the three pre-existing profile works to
-the first of them. All three steps are guarded per row, so restarting is safe
-and there is no manual step to run after a deploy.
+Schema changes are Alembic migrations in `migrations/versions/`. The app also
+migrates on startup, so a plain restart is always safe.
 
-Claims release themselves two hours after a tester's last request. To clear
-them all before a demo round:
+## First install on a new server
+
+```bash
+sudo apt-get update && sudo apt-get install -y curl nginx sqlite3 rsync
+curl -LsSf https://astral.sh/uv/install.sh | sudo env UV_INSTALL_DIR=/usr/local/bin sh
+sudo useradd --system --home /srv/beeplay --shell /usr/sbin/nologin beeplay
+sudo mkdir -p /srv/beeplay && sudo chown beeplay:beeplay /srv/beeplay
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo ln -sfn /etc/nginx/sites-available/beeplay /etc/nginx/sites-enabled/beeplay
+```
+
+Then `deploy/push.sh`, and `systemctl enable beeplay nginx`. Open TCP port 80
+in the cloud firewall.
+
+## State
+
+Everything lives in `/var/lib/beeplay`:
+
+| Path | What |
+|------|------|
+| `beeplay.db` | SQLite: users, works (with `status`), `work_events`, `health_events`, `failed_uploads` |
+| `games/<artifact>/` | one directory per uploaded version; replaced versions stay |
+| `failed/<id>.zip` | uploads that failed validation, waiting for an operator |
+| `logs/events.jsonl` | one JSON line per event; the journal has the same lines |
+
+## Operating the event
+
+```bash
+beeplay-ops list                  # every game: id, status, owner, artifact, title
+beeplay-ops failed                # broken uploads waiting for a fix
+beeplay-ops import ~/fixed --from-failed 7        # fix and insert under the uploader
+beeplay-ops import ~/game --owner beeplay --title … --category … --emoji 🎮
+beeplay-ops import ~/qa --owner beeplay … --unlisted  # test game, link only
+beeplay-ops replace 12 ~/fixed    # new version; a hidden game comes back live
+beeplay-ops status 12 live        # also: hidden, unlisted, deleted
+beeplay-ops health 12             # plays and errors in the crash window
+beeplay-ops history 12            # full audit trail
+```
+
+A game is hidden automatically when at least 3 plays in 30 minutes failed and
+failures are at least half of the plays. A play fails if the game has not
+loaded after 10 s, or throws in its first 30 s. The thresholds are in
+`/etc/beeplay/beeplay.env`. Crash reports are unauthenticated: if fake reports
+hide a good game, `beeplay-ops status <id> live`.
+
+Tracing one game or one uploader:
+
+```bash
+grep '"work_id": 12' /var/lib/beeplay/logs/events.jsonl
+grep '"slug": "bee-3"' /var/lib/beeplay/logs/events.jsonl
+journalctl -u beeplay -o cat | grep auto_hidden
+```
+
+## Alerts
+
+New uploads, failed uploads and auto-hidden games post to a Feishu webhook
+once `BEEPLAY_ALERT_WEBHOOK` in `/etc/beeplay/beeplay.env` is set, then
+`systemctl restart beeplay`. Until then alerts only reach the logs. The
+lark-cli app bot cannot post to the external 🐝蜂玩BeePlay group; add a custom
+bot in that group's settings and paste its webhook URL.
+
+## Tester identities
+
+Claims release two hours after a tester's last request. To free them all
+before a demo round:
 
 ```bash
 sudo -u beeplay sqlite3 /var/lib/beeplay/beeplay.db \
   "UPDATE users SET last_seen_at = NULL, claim_token = NULL;"
-```
-
-## Verify
-
-```bash
-systemctl status beeplay nginx
-curl -sI http://127.0.0.1:8000/ | head -1
-curl -sI http://127.0.0.1/ | head -1
-curl -sI http://127.0.0.1/games/af359667cf6a8038/index.html | head -1
-```
-
-## Deploying a change
-
-```bash
-sudo rsync -a --delete --exclude '.git' --exclude '.venv' --exclude 'beeplay.db*' --exclude 'games' ./ /srv/beeplay/
-sudo chown -R beeplay:beeplay /srv/beeplay
-sudo chmod -R a+rX /srv/beeplay/assets
-sudo -u beeplay uv sync --project /srv/beeplay --frozen
-sudo systemctl restart beeplay.service
-sudo nginx -t && sudo systemctl reload nginx
 ```

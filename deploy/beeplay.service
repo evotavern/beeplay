@@ -10,12 +10,12 @@ User=beeplay
 Group=beeplay
 WorkingDirectory=/srv/beeplay
 
-# StateDirectory creates and owns /var/lib/beeplay, which is where the SQLite
-# database lives — the app directory itself is read-only under ProtectSystem.
+# StateDirectory creates and owns /var/lib/beeplay: the database, the unpacked
+# games, failed uploads and the event log all live there, because the app
+# directory is read-only under ProtectSystem.
 StateDirectory=beeplay
-Environment=BEEPLAY_DB_PATH=/var/lib/beeplay/beeplay.db
-# Unpacked games, for the same reason: /srv/beeplay is read-only.
-Environment=BEEPLAY_GAMES_DIR=/var/lib/beeplay/games
+# Paths, the HTTP flag, the alert webhook and crash thresholds.
+EnvironmentFile=/etc/beeplay/beeplay.env
 
 # --proxy-headers makes uvicorn trust X-Forwarded-Proto from Nginx, so the app
 # knows requests arrived over https; the trust is limited to localhost.

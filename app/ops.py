@@ -9,6 +9,7 @@
     beeplay-ops health WORK_ID               # recent plays and errors
     beeplay-ops history WORK_ID              # the audit trail
     beeplay-ops refresh-reporter             # add the crash reporter to older games
+    beeplay-ops migrate                      # schema + seed; release.sh runs it
 
 SSH access is the only authentication. Every change is audited as ops:<user>.
 """
@@ -162,6 +163,11 @@ def cmd_refresh_reporter(session: Session, args) -> None:
         print(f"work {work.id}: reporter added, now {work.artifact_hash}")
 
 
+def cmd_migrate(session: Session, args) -> None:
+    db.init_db()
+    print("database is at the latest schema")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="beeplay-ops", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -203,6 +209,7 @@ def build_parser() -> argparse.ArgumentParser:
         sub.set_defaults(run=run)
 
     commands.add_parser("refresh-reporter").set_defaults(run=cmd_refresh_reporter)
+    commands.add_parser("migrate").set_defaults(run=cmd_migrate)
     return parser
 
 
