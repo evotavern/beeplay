@@ -14,7 +14,7 @@ from datetime import timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import config, events, ingest
+from app import browsers, config, events, ingest
 from app.models import HealthEvent, Work, utcnow
 
 KINDS = ("start", "loaded", "error", "timeout")
@@ -61,6 +61,7 @@ def report(
     kind: str,
     elapsed_ms: int | None = None,
     detail: str | None = None,
+    user_agent: str | None = None,
 ) -> None:
     if kind not in KINDS:
         raise ValueError(f"kind must be one of {', '.join(KINDS)}")
@@ -88,6 +89,7 @@ def report(
         "health_fail" if counted else "health_error_late",
         work_id=work.id, artifact=artifact_hash, session=session_id,
         kind=kind, elapsed_ms=elapsed_ms, detail=event.detail,
+        **browsers.fields(user_agent),
     )
     if counted and work.status == "live":
         _hide_if_crashing(session, work)

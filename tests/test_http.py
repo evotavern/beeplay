@@ -1,6 +1,7 @@
 """End-to-end over HTTP: a real app, a real (temporary) database, plain http://."""
 
 import io
+import json
 import os
 import tempfile
 import unittest
@@ -14,6 +15,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app import config, db, events, main
 from app.models import HealthEvent, Work, WorkLike, WorkSave, WorkShare, WorkView
+
+
+WECHAT = (
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.78(0x18004e2e) NetType/WIFI Language/zh_CN"
+)
 
 
 def game_zip() -> bytes:
@@ -57,11 +64,12 @@ class HttpTests(unittest.TestCase):
         response = self.client.post(f"/claim/{slug}?csrf_token={token}", follow_redirects=False)
         self.assertEqual(response.status_code, 303)
 
-    def upload(self, **overrides):
+    def upload(self, headers: dict | None = None, **overrides):
         form = {"title": "Block Drop", "category": "brainrot", "emoji": "🧱", "art": "art-two"}
         form.update(overrides)
         return self.client.post(
-            "/api/import-game", data=form, files={"bundle": ("game.zip", game_zip(), "application/zip")}
+            "/api/import-game", data=form, headers=headers,
+            files={"bundle": ("game.zip", game_zip(), "application/zip")},
         )
 
     def test_claim_upload_play_and_crash_over_plain_http(self) -> None:
@@ -177,6 +185,63 @@ class HttpTests(unittest.TestCase):
             save = self.client.post(f"/api/works/{work_id}/save", json={"active": active})
             self.assertEqual(save.status_code, 200)
             self.assertEqual(save.json(), {"active": active})
+
+    def logged(self, event: str) -> list[dict]:
+        if not config.EVENTS_LOG.exists():
+            return []
+        lines = [json.loads(line) for line in config.EVENTS_LOG.read_text().splitlines()]
+        return [line for line in lines if line["event"] == event]
+
+    def test_failed_requests_are_logged_with_the_browser(self) -> None:
+        self.client.get("/", headers={"User-Agent": WECHAT})
+        self.assertEqual(self.upload(headers={"User-Agent": WECHAT}).status_code, 401)
+        self.client.post("/claim/bee-2?csrf_token=secret-token", follow_redirects=False)
+
+        errors = self.logged("http_error")
+        self.assertEqual(
+            [(e["method"], e["path"], e["status"]) for e in errors],
+            [("POST", "/api/import-game", 401), ("POST", "/claim/bee-2", 403)],
+        )
+        self.assertEqual(errors[0]["browser"], "wechat")
+        self.assertEqual(errors[0]["ua"], WECHAT)
+        self.assertNotIn("secret-token", config.EVENTS_LOG.read_text())
+
+    def test_a_crashing_request_is_logged_as_a_500(self) -> None:
+        crashing = TestClient(main.app, raise_server_exceptions=False)
+        with patch.object(main, "feed_games", side_effect=RuntimeError("boom")):
+            self.assertEqual(crashing.get("/").status_code, 500)
+
+        [error] = self.logged("http_error")
+        self.assertEqual((error["path"], error["status"]), ("/", 500))
+        self.assertIn("boom", error["error"])
+
+    def test_client_errors_are_logged_with_the_browser(self) -> None:
+        reply = self.client.post(
+            "/api/client-error",
+            headers={"User-Agent": WECHAT},
+            json={"kind": "upload", "message": "网络断开了", "page": "/create"},
+        )
+        self.assertEqual(reply.status_code, 204)
+
+        [error] = self.logged("client_error")
+        self.assertEqual((error["kind"], error["message"], error["page"]), ("upload", "网络断开了", "/create"))
+        self.assertEqual(error["browser"], "wechat")
+
+    def test_client_error_kinds_are_checked(self) -> None:
+        reply = self.client.post("/api/client-error", json={"kind": "made-up", "message": "x"})
+        self.assertEqual(reply.status_code, 422)
+        self.assertEqual(self.logged("client_error"), [])
+
+    def test_crash_reports_carry_the_browser(self) -> None:
+        for kind in ("start", "error"):
+            self.client.post(
+                "/api/game-health",
+                headers={"User-Agent": WECHAT},
+                json={"artifact": "af359667cf6a8038", "session": "p", "kind": kind, "elapsed_ms": 500},
+            )
+        [failure] = self.logged("health_fail")
+        self.assertEqual(failure["browser"], "wechat")
+        self.assertEqual(failure["ua"], WECHAT)
 
 
 if __name__ == "__main__":

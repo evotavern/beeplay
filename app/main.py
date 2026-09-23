@@ -5,6 +5,7 @@ import secrets
 from contextlib import asynccontextmanager
 from math import ceil
 from pathlib import Path
+from typing import Literal
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -16,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.avatars import avatar
 from app.data import PROFILE_TABS
 from app.db import get_session, init_db
-from app import config, health, ingest
+from app import browsers, config, events, health, ingest
 from app.game_imports import GameImportError, pack_zip, read_zip
 from app.models import User
 from app.repository import (
@@ -102,6 +103,25 @@ app = FastAPI(
     # without each handler having to ask for it.
     dependencies=[Depends(current_identity)],
 )
+
+
+@app.middleware("http")
+async def log_failed_requests(request: Request, call_next) -> Response:
+    """Every 4xx/5xx and every crash lands in events.jsonl for `beeplay-ops ux`.
+
+    Only the path is kept: query strings can carry tokens (the claim CSRF).
+    """
+    where = {"method": request.method, "path": request.url.path}
+    client = browsers.fields(request.headers.get("user-agent"))
+    try:
+        response = await call_next(request)
+    except Exception as error:
+        events.log_event("http_error", **where, status=500, error=repr(error)[:500], **client)
+        raise
+    if response.status_code >= 400:
+        events.log_event("http_error", **where, status=response.status_code, **client)
+    return response
+
 
 app.mount("/assets", StaticFiles(directory=BASE_DIR / "assets"), name="assets")
 
@@ -479,7 +499,9 @@ def create_share(
 
 
 @app.post("/api/game-health", status_code=204)
-def game_health(report: HealthReport, session: Session = Depends(get_session)) -> Response:
+def game_health(
+    report: HealthReport, request: Request, session: Session = Depends(get_session)
+) -> Response:
     """Crash signals forwarded by the game host; see app/health.py."""
     try:
         health.report(
@@ -489,9 +511,33 @@ def game_health(report: HealthReport, session: Session = Depends(get_session)) -
             kind=report.kind,
             elapsed_ms=report.elapsed_ms,
             detail=report.detail,
+            user_agent=request.headers.get("user-agent"),
         )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+    return Response(status_code=204)
+
+
+class ClientError(BaseModel):
+    """A failure the page itself saw; sent by assets/js/page-reporter.js."""
+
+    kind: Literal["error", "rejection", "script", "upload"]
+    message: str = Field(max_length=1000)
+    page: str | None = Field(default=None, max_length=300)
+    source: str | None = Field(default=None, max_length=500)
+    line: int | None = None
+    column: int | None = None
+    stack: str | None = Field(default=None, max_length=4000)
+
+
+@app.post("/api/client-error", status_code=204)
+def client_error(report: ClientError, request: Request) -> Response:
+    """Log only, like game health: unauthenticated, so nothing acts on it."""
+    events.log_event(
+        "client_error",
+        **report.model_dump(exclude_none=True),
+        **browsers.fields(request.headers.get("user-agent")),
+    )
     return Response(status_code=204)
 
 
