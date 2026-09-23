@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.avatars import avatar
 from app.data import PROFILE_TABS
@@ -116,10 +117,15 @@ async def log_failed_requests(request: Request, call_next) -> Response:
     try:
         response = await call_next(request)
     except Exception as error:
-        events.log_event("http_error", **where, status=500, error=repr(error)[:500], **client)
+        await run_in_threadpool(
+            events.log_event, "http_error", **where, status=500,
+            error=repr(error)[:500], **client,
+        )
         raise
     if response.status_code >= 400:
-        events.log_event("http_error", **where, status=response.status_code, **client)
+        await run_in_threadpool(
+            events.log_event, "http_error", **where, status=response.status_code, **client
+        )
     return response
 
 
@@ -533,6 +539,11 @@ class ClientError(BaseModel):
 @app.post("/api/client-error", status_code=204)
 def client_error(report: ClientError, request: Request) -> Response:
     """Log only, like game health: unauthenticated, so nothing acts on it."""
+    client = request.client.host if request.client else "unknown"
+    if not events.client_error_limiter.allow(client):
+        # Stay quiet: a 429 would be written by log_failed_requests and let a
+        # flood consume the same disk this limit protects.
+        return Response(status_code=204)
     events.log_event(
         "client_error",
         **report.model_dump(exclude_none=True),

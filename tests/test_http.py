@@ -227,6 +227,16 @@ class HttpTests(unittest.TestCase):
         self.assertEqual((error["kind"], error["message"], error["page"]), ("upload", "网络断开了", "/create"))
         self.assertEqual(error["browser"], "wechat")
 
+    def test_rate_limited_client_errors_are_dropped_without_logging_a_429(self) -> None:
+        with patch.object(events.client_error_limiter, "allow", return_value=False):
+            reply = self.client.post(
+                "/api/client-error", json={"kind": "error", "message": "flood"}
+            )
+
+        self.assertEqual(reply.status_code, 204)
+        self.assertEqual(self.logged("client_error"), [])
+        self.assertEqual(self.logged("http_error"), [])
+
     def test_client_error_kinds_are_checked(self) -> None:
         reply = self.client.post("/api/client-error", json={"kind": "made-up", "message": "x"})
         self.assertEqual(reply.status_code, 422)

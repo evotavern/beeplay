@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from app import ux
 
@@ -52,6 +53,19 @@ class SummarizeTests(unittest.TestCase):
         self.assertEqual([g.signature for g in summary["creation"]], ["error: x is undefined"])
         self.assertEqual([g.signature for g in summary["other"]], ["error: y is undefined"])
 
+    def test_counts_a_failed_play_once_and_not_the_derived_auto_hide(self) -> None:
+        summary = ux.summarize([
+            {"event": "health_fail", "work_id": 16, "artifact": "a", "session": "play-1",
+             "kind": "error", "detail": "boom", "browser": "wechat"},
+            {"event": "health_fail", "work_id": 16, "artifact": "a", "session": "play-1",
+             "kind": "timeout", "detail": "no load", "browser": "wechat"},
+            {"event": "auto_hidden", "work_id": 16, "failed": 3, "plays": 3},
+        ])
+
+        self.assertEqual([(group.signature, group.count) for group in summary["gameplay"]], [
+            ("work 16: boom", 1),
+        ])
+
 
 class ReadEventsTests(unittest.TestCase):
     def test_keeps_only_events_inside_the_window_and_skips_broken_lines(self) -> None:
@@ -63,7 +77,8 @@ class ReadEventsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             log = Path(directory) / "events.jsonl"
             log.write_text("\n".join(json.dumps(line) for line in lines) + "\nnot json\n")
-            events = ux.read_events(log, since=now - timedelta(hours=1))
+            with patch.object(Path, "read_text", side_effect=AssertionError("loads whole log")):
+                events = ux.read_events(log, since=now - timedelta(hours=1))
             self.assertEqual([e["at"] for e in events], ["2026-09-23T11:30:00Z"])
             self.assertEqual(ux.read_events(Path(directory) / "missing.jsonl", since=now), [])
 

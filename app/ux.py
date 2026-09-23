@@ -1,7 +1,7 @@
 """What users ran into since the last check, for `beeplay-ops ux`.
 
 Reads the failure events in events.jsonl (http_error, client_error from the
-page reporter, health_fail and auto_hidden from the game reporter) and groups
+page reporter, and health_fail from the game reporter) and groups
 them by area and by browser. Creation and gameplay are in scope; everything
 else is only counted.
 """
@@ -9,6 +9,7 @@ else is only counted.
 import json
 import re
 from collections import Counter
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -50,24 +51,47 @@ def _at(event: dict) -> datetime | None:
 
 
 def read_events(log: Path, *, since: datetime) -> list[dict]:
-    """Events at or after `since` (naive UTC, like the log)."""
+    """Events at or after `since`, scanning backward from the append-only tail."""
     if not log.is_file():
         return []
     events = []
-    for line in log.read_text(encoding="utf-8").splitlines():
+    for line in _reverse_lines(log):
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
             continue
         at = _at(event) if isinstance(event, dict) else None
-        if at is not None and at >= since:
+        if at is not None and at < since:
+            break
+        if at is not None:
             events.append(event)
+    events.reverse()
     return events
+
+
+def _reverse_lines(path: Path, block_size: int = 64 * 1024) -> Iterator[str]:
+    """Yield UTF-8 lines from an append-only file without loading it all."""
+    with path.open("rb") as source:
+        source.seek(0, 2)
+        position = source.tell()
+        remainder = b""
+        while position:
+            size = min(block_size, position)
+            position -= size
+            source.seek(position)
+            chunk = source.read(size) + remainder
+            lines = chunk.split(b"\n")
+            remainder = lines[0]
+            for line in reversed(lines[1:]):
+                if line:
+                    yield line.decode("utf-8")
+        if remainder:
+            yield remainder.decode("utf-8")
 
 
 def _area(event: dict) -> str | None:
     name = event.get("event")
-    if name in ("health_fail", "auto_hidden"):
+    if name == "health_fail":
         return "gameplay"
     if name == "http_error":
         path = event.get("path", "")
@@ -92,16 +116,22 @@ def _signature(event: dict) -> str:
         return f"{event.get('kind', '?')}: {str(event.get('message', ''))[:160]}"
     if name == "health_fail":
         return f"work {event.get('work_id')}: {str(event.get('detail') or event.get('kind'))[:160]}"
-    return f"work {event.get('work_id')} auto-hidden ({event.get('failed')}/{event.get('plays')} plays failed)"
+    raise ValueError(f"unsupported failure event: {name}")
 
 
 def summarize(events: list[dict]) -> dict[str, list[Group]]:
     """Failure groups per area ("creation", "gameplay", "other"), biggest first."""
     groups: dict[tuple[str, str], Group] = {}
+    health_sessions: set[tuple] = set()
     for event in events:
         area = _area(event)
         if area is None:
             continue
+        if event.get("event") == "health_fail" and event.get("session"):
+            play = (event.get("work_id"), event.get("artifact"), event["session"])
+            if play in health_sessions:
+                continue
+            health_sessions.add(play)
         signature = _signature(event)
         group = groups.setdefault((area, signature), Group(area, signature))
         group.count += 1
