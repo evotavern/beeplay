@@ -658,6 +658,7 @@
     .import-back { min-height: 42px; padding: 0 12px; border: 0; background: transparent; color: var(--muted); font-size: 13px; font-weight: 850; }
     .import-submit { min-height: 42px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--ink); color: var(--white); font-size: 13px; font-weight: 850; }
     .import-submit:disabled { opacity: 0.56; cursor: wait; }
+    .import-progress { width: 100%; height: 8px; margin: -4px 0 0; accent-color: var(--lime-dark); }
     .import-status { min-height: 17px; margin: -5px 0 0; color: var(--muted); font-size: 12px; text-align: center; }
 
     /* Game host. Full-bleed and above the nav, so the game gets the whole
@@ -1234,6 +1235,7 @@
           </fieldset>
           <label class="import-title-label" for="importGameDescription">一句话介绍 <span>可选</span><input class="import-title" id="importGameDescription" maxlength="200" placeholder="这个游戏好玩在哪？" /></label>
           <div class="import-footer"><button class="import-back" type="button" id="importBack">← 返回</button><button class="import-submit" type="submit" id="importGameSubmit">加入游戏流 →</button></div>
+          <progress class="import-progress" id="importProgress" max="1" hidden></progress>
           <p class="import-status" id="importStatus" role="status"></p>
         </form>
       </div>

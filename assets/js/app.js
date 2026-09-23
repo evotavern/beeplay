@@ -82,6 +82,51 @@
     setCreateModalCopy("你想玩什么？", "选择一个入口，马上开始你的 Bee。");
   }
 
+  var importProgress = document.getElementById("importProgress");
+
+  function megabytes(bytes) {
+    return (bytes / 1048576).toFixed(1);
+  }
+
+  // Upload progress needs XMLHttpRequest: fetch() cannot observe the request
+  // body leaving the browser. Resolves with a fetch-like response so the
+  // handling below reads the same either way.
+  function postWithProgress(url, data, onProgress) {
+    return new Promise(function (resolve, reject) {
+      var xhr = new XMLHttpRequest();
+      xhr.open("POST", url);
+      xhr.upload.onprogress = function (event) {
+        if (event.lengthComputable) onProgress(event.loaded, event.total);
+      };
+      xhr.upload.onload = function () { onProgress(1, 1); };
+      xhr.onload = function () {
+        resolve({
+          ok: xhr.status >= 200 && xhr.status < 300,
+          status: xhr.status,
+          json: function () {
+            return new Promise(function (done) { done(JSON.parse(xhr.responseText)); });
+          }
+        });
+      };
+      xhr.onerror = function () { reject(new Error("网络断开了，上传没有完成，请重试")); };
+      xhr.send(data);
+    });
+  }
+
+  function showUploadProgress(loaded, total) {
+    var status = document.getElementById("importStatus");
+    importProgress.hidden = false;
+    if (total && loaded >= total) {
+      importProgress.removeAttribute("value");
+      status.textContent = "上传完成，正在放进游戏流…";
+      return;
+    }
+    importProgress.value = total ? loaded / total : 0;
+    status.textContent = total
+      ? "正在上传… " + Math.round(100 * loaded / total) + "%（" + megabytes(loaded) + " / " + megabytes(total) + " MB）"
+      : "正在上传…";
+  }
+
   function selectImport(kind, files) {
     if (!files.length) return;
     importSelection = { kind: kind, files: [].slice.call(files) };
@@ -299,8 +344,8 @@
         data.append("paths", file.webkitRelativePath || file.name);
       });
     }
-    document.getElementById("importStatus").textContent = "正在加入游戏流…";
-    fetch("/api/import-game", { method: "POST", body: data })
+    showUploadProgress(0, 0);
+    postWithProgress("/api/import-game", data, showUploadProgress)
       .then(function (response) {
         return response.json().catch(function () {
           throw new Error(response.ok ? "导入失败" : "服务器拒绝了上传，请检查文件大小后重试");
@@ -326,6 +371,7 @@
       .catch(function (error) {
         document.getElementById("importStatus").textContent = error.message;
       })
+      .finally(function () { importProgress.hidden = true; })
       .finally(function () { importSubmit.disabled = false; });
   });
 
