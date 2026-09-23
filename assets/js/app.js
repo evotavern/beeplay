@@ -114,6 +114,14 @@
     });
   }
 
+  function reportUploadFailure(error, status) {
+    if (!window.beeplayReport || !importSelection) return;
+    var bytes = importSelection.files.reduce(function (sum, file) { return sum + file.size; }, 0);
+    window.beeplayReport("upload", error.message + " (" + (status ? "HTTP " + status : "no response") + ", "
+      + importSelection.kind + " " + importSelection.files.length + " files "
+      + (bytes / 1048576).toFixed(1) + " MB)");
+  }
+
   function showUploadProgress(loaded, total) {
     var status = document.getElementById("importStatus");
     importProgress.hidden = false;
@@ -439,11 +447,15 @@
       });
     }
     showUploadProgress(0, 0);
+    var answered = false;
+    var httpStatus = 0;
     postWithProgress("/api/import-game", data, showUploadProgress)
       .then(function (response) {
+        httpStatus = response.status;
         return response.json().catch(function () {
           throw new Error(response.ok ? "导入失败" : "服务器拒绝了上传，请检查文件大小后重试");
         }).then(function (result) {
+          answered = true;
           if (response.status === 401) {
             window.location.href = "/claim";
             throw new Error(result.detail);
@@ -463,6 +475,8 @@
         });
       })
       .catch(function (error) {
+        // A refusal the app answered is already in the server's log.
+        if (!answered) reportUploadFailure(error, httpStatus);
         document.getElementById("importStatus").textContent = error.message;
       })
       .finally(function () { importProgress.hidden = true; })

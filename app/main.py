@@ -5,6 +5,7 @@ import secrets
 from contextlib import asynccontextmanager
 from math import ceil
 from pathlib import Path
+from typing import Literal
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -12,11 +13,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.avatars import avatar
 from app.data import PROFILE_TABS
 from app.db import get_session, init_db
-from app import config, generation, health, ingest
+from app import browsers, config, events, generation, health, ingest
 from app.game_imports import GameImportError, pack_zip, read_zip
 from app.generation_routes import router as generation_router
 from app.identity import current_identity
@@ -100,9 +102,33 @@ app = FastAPI(
     dependencies=[Depends(current_identity)],
 )
 
+
+@app.middleware("http")
+async def log_failed_requests(request: Request, call_next) -> Response:
+    """Every 4xx/5xx and every crash lands in events.jsonl for `beeplay-ops ux`.
+
+    Only the path is kept: query strings can carry tokens (the claim CSRF).
+    """
+    where = {"method": request.method, "path": request.url.path}
+    client = browsers.fields(request.headers.get("user-agent"))
+    try:
+        response = await call_next(request)
+    except Exception as error:
+        await run_in_threadpool(
+            events.log_event, "http_error", **where, status=500,
+            error=repr(error)[:500], **client,
+        )
+        raise
+    if response.status_code >= 400:
+        await run_in_threadpool(
+            events.log_event, "http_error", **where, status=response.status_code, **client
+        )
+    return response
+
+
 app.mount("/assets", StaticFiles(directory=BASE_DIR / "assets"), name="assets")
 
-# Development convenience: in production Nginx serves /games/* straight from
+# Development convenience: in production Caddy serves /games/* straight from
 # disk, so game files never go through uvicorn's threadpool.
 class GameFiles(StaticFiles):
     async def get_response(self, path, scope):
@@ -119,7 +145,7 @@ app.mount("/games", GameFiles(directory=GAMES_DIR), name="games")
 def asset(path: str) -> str:
     """URL for a file under assets/, versioned by its contents.
 
-    Nginx lets browsers cache /assets/ for a week, so an unversioned URL keeps
+    Caddy lets browsers cache /assets/ for a week, so an unversioned URL keeps
     returning visitors on the previous release's JavaScript after a deploy.
     Hashed once per process, i.e. once per release.
     """
@@ -485,7 +511,9 @@ def create_share(
 
 
 @app.post("/api/game-health", status_code=204)
-def game_health(report: HealthReport, session: Session = Depends(get_session)) -> Response:
+def game_health(
+    report: HealthReport, request: Request, session: Session = Depends(get_session)
+) -> Response:
     """Crash signals forwarded by the game host; see app/health.py."""
     try:
         health.report(
@@ -495,9 +523,38 @@ def game_health(report: HealthReport, session: Session = Depends(get_session)) -
             kind=report.kind,
             elapsed_ms=report.elapsed_ms,
             detail=report.detail,
+            user_agent=request.headers.get("user-agent"),
         )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+    return Response(status_code=204)
+
+
+class ClientError(BaseModel):
+    """A failure the page itself saw; sent by assets/js/page-reporter.js."""
+
+    kind: Literal["error", "rejection", "script", "upload"]
+    message: str = Field(max_length=1000)
+    page: str | None = Field(default=None, max_length=300)
+    source: str | None = Field(default=None, max_length=500)
+    line: int | None = None
+    column: int | None = None
+    stack: str | None = Field(default=None, max_length=4000)
+
+
+@app.post("/api/client-error", status_code=204)
+def client_error(report: ClientError, request: Request) -> Response:
+    """Log only, like game health: unauthenticated, so nothing acts on it."""
+    client = request.client.host if request.client else "unknown"
+    if not events.client_error_limiter.allow(client):
+        # Stay quiet: a 429 would be written by log_failed_requests and let a
+        # flood consume the same disk this limit protects.
+        return Response(status_code=204)
+    events.log_event(
+        "client_error",
+        **report.model_dump(exclude_none=True),
+        **browsers.fields(request.headers.get("user-agent")),
+    )
     return Response(status_code=204)
 
 

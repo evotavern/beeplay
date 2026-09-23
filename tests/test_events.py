@@ -26,6 +26,19 @@ class LogEventTests(unittest.TestCase):
         self.assertIn("at", lines[0])
 
 
+class RateLimiterTests(unittest.TestCase):
+    def test_limits_each_client_and_the_total_then_recovers(self) -> None:
+        limiter = events.RateLimiter(per_client=2, total=3, window_s=60)
+
+        self.assertTrue(limiter.allow("a", now=0))
+        self.assertTrue(limiter.allow("a", now=1))
+        self.assertFalse(limiter.allow("a", now=2))
+        self.assertTrue(limiter.allow("b", now=2))
+        self.assertFalse(limiter.allow("c", now=2))
+        self.assertTrue(limiter.allow("c", now=61))
+        self.assertNotIn("a", limiter._clients)
+
+
 class RecordTests(unittest.TestCase):
     def test_records_an_audit_row_and_a_log_line(self) -> None:
         engine = create_engine("sqlite://")

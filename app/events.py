@@ -10,6 +10,8 @@ import json
 import sys
 import threading
 import urllib.request
+from collections import defaultdict, deque
+from time import monotonic
 
 from sqlalchemy.orm import Session
 
@@ -17,6 +19,39 @@ from app import config
 from app.models import User, Work, WorkEvent, utcnow
 
 _write_lock = threading.Lock()
+
+
+class RateLimiter:
+    """Small process-local sliding-window limiter for write-only telemetry."""
+
+    def __init__(self, *, per_client: int, total: int, window_s: float) -> None:
+        self.per_client = per_client
+        self.total = total
+        self.window_s = window_s
+        self._all: deque[float] = deque()
+        self._clients: dict[str, deque[float]] = defaultdict(deque)
+        self._lock = threading.Lock()
+
+    def allow(self, client: str, *, now: float | None = None) -> bool:
+        current = monotonic() if now is None else now
+        cutoff = current - self.window_s
+        with self._lock:
+            while self._all and self._all[0] <= cutoff:
+                self._all.popleft()
+            for key, queued in list(self._clients.items()):
+                while queued and queued[0] <= cutoff:
+                    queued.popleft()
+                if not queued:
+                    del self._clients[key]
+            client_events = self._clients[client]
+            if len(self._all) >= self.total or len(client_events) >= self.per_client:
+                return False
+            self._all.append(current)
+            client_events.append(current)
+            return True
+
+
+client_error_limiter = RateLimiter(per_client=10, total=100, window_s=60)
 
 
 def log_event(event: str, **fields) -> None:

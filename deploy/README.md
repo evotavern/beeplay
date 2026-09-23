@@ -1,21 +1,27 @@
 # Deploying Beeplay
 
-Nginx on port 80 serves `/assets/` and `/games/` from disk and proxies
-everything else to uvicorn on `127.0.0.1:8000`. The current server is
-`http://47.251.140.176/` (ssh alias `evotavern`).
+Caddy owns ports 80 and 443 for the shared host. It serves BeePlay's
+`/assets/` and `/games/` from disk and proxies everything else to uvicorn on
+`127.0.0.1:8000`. The canonical site is `https://beeplay.top/` (ssh alias
+`evotavern`). Claim cookies are Secure; direct HTTP and unrecognized hosts do
+not serve the application.
 
-## Plain HTTP for now
+## One-time nginx-to-Caddy migration
 
-The site runs without TLS. Claim cookies are bearer credentials, so the app
-only issues them over HTTP because `/etc/beeplay/beeplay.env` sets
-`BEEPLAY_ALLOW_INSECURE_CLAIMS=1`. Moving to HTTPS later:
+The existing host also serves Moonanswer. Its current Caddy site and global
+options must remain intact. After DNS for `beeplay.top` and `www.beeplay.top`
+points to `47.251.140.176`, copy this checkout to the server and run:
 
-1. Put TLS in front (Caddy, or certbot with Nginx). Nginx already forwards
-   `X-Forwarded-Proto`, and uvicorn runs with `--proxy-headers`.
-2. In `/etc/beeplay/beeplay.env`, delete `BEEPLAY_ALLOW_INSECURE_CLAIMS=1`
-   and set `BEEPLAY_PUBLIC_URL=https://…`.
-3. `systemctl restart beeplay`. Cookies pick up the `Secure` flag on their
-   own; testers claim again once.
+```bash
+sudo bash deploy/setup-caddy.sh
+```
+
+The script backs up `/etc/caddy/Caddyfile`, splits Moonanswer into
+`/etc/caddy/sites/moonanswer.caddy`, installs the BeePlay fragment, validates
+the combined configuration, removes the insecure claim-cookie override, then
+switches the public edge from nginx to Caddy. If validation or Caddy startup
+fails, it restores the previous Caddy configuration and re-enables nginx.
+Existing HTTP claim cookies must be claimed again after the cutover.
 
 ## Releasing
 
@@ -31,7 +37,7 @@ This copies the tree to `/root/beeplay-release/` and runs
 - installs `/etc/beeplay/beeplay.env` if missing (never overwrites it)
 - backs the database up to `/var/backups/beeplay/beeplay-<time>.db`
 - keeps the previous code at `/srv/beeplay.prev`
-- syncs code, installs dependencies, the systemd unit, the Nginx site and
+- syncs code, installs dependencies, the systemd unit, the BeePlay Caddy site and
   `/usr/local/bin/beeplay-ops`
 - stops the app, migrates the schema (`beeplay-ops migrate`), adds the crash
   reporter to games installed before it existed (`beeplay-ops
@@ -44,16 +50,16 @@ migrates on startup, so a plain restart is always safe.
 ## First install on a new server
 
 ```bash
-sudo apt-get update && sudo apt-get install -y curl nginx sqlite3 rsync
+sudo apt-get update && sudo apt-get install -y curl sqlite3 rsync
 curl -LsSf https://astral.sh/uv/install.sh | sudo env UV_INSTALL_DIR=/usr/local/bin sh
 sudo useradd --system --home /srv/beeplay --shell /usr/sbin/nologin beeplay
 sudo mkdir -p /srv/beeplay && sudo chown beeplay:beeplay /srv/beeplay
-sudo rm -f /etc/nginx/sites-enabled/default
-sudo ln -sfn /etc/nginx/sites-available/beeplay /etc/nginx/sites-enabled/beeplay
 ```
 
-Then `deploy/push.sh`, and `systemctl enable beeplay nginx`. Open TCP port 80
-in the cloud firewall.
+Install Caddy with the Cloudflare DNS module required by the shared
+Moonanswer configuration, create `/etc/caddy/cloudflare.env`, then run
+`deploy/push.sh` followed by `deploy/setup-caddy.sh`. Enable `beeplay` and
+open TCP ports 80 and 443 in the cloud firewall.
 
 ## State
 
@@ -65,6 +71,7 @@ Everything lives in `/var/lib/beeplay`:
 | `games/<artifact>/` | one directory per uploaded version; replaced versions stay |
 | `failed/<id>.zip` | uploads that failed validation, waiting for an operator |
 | `logs/events.jsonl` | one JSON line per event; the journal has the same lines |
+| `logs/ux-last-run` | when `beeplay-ops ux` last ran |
 
 ## Operating the event
 
@@ -85,6 +92,21 @@ failures are at least half of the plays. A play fails if the game has not
 loaded after 10 s, or throws in its first 30 s. The thresholds are in
 `/etc/beeplay/beeplay.env`. Crash reports are unauthenticated: if fake reports
 hide a good game, `beeplay-ops status <id> live`.
+
+What players ran into since the last check, by area and browser:
+
+```bash
+beeplay-ops ux                    # since the last check, then records this one
+beeplay-ops ux --every 60         # only if the last check is over an hour old
+beeplay-ops ux --since 2h --no-mark
+```
+
+It reads `http_error` (every 4xx/5xx the app answered, with the browser),
+`client_error` (what the page's own reporter, `assets/js/page-reporter.js`,
+caught: script errors and uploads that never reached the app, e.g. a 413 from
+the edge proxy) and the crash events above. Creation and gameplay are listed in full,
+everything else is only counted; "in-app only" means every report came from
+WeChat, QQ, Douyin or another in-app browser.
 
 Tracing one game or one uploader:
 
