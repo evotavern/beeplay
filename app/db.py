@@ -2,11 +2,13 @@ import os
 from collections.abc import Iterator
 from pathlib import Path
 
-from sqlalchemy import create_engine, event, func, select, update
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import create_engine, event, func, inspect, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.data import FEED_GAMES, USERS, WORKS
-from app.models import Base, User, Work
+from app.models import User, Work
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 # Deployed, the app directory is read-only and state belongs in
@@ -44,22 +46,40 @@ def get_session() -> Iterator[Session]:
         yield session
 
 
-def _ensure_work_user_id() -> None:
-    """Add works.user_id to a database that predates ownership.
+MIGRATIONS_DIR = BASE_DIR / "migrations"
+HEAD_REVISION = "0002"
 
-    create_all() creates missing tables but never alters existing ones, and the
-    deployed database already has a works table. Checking the column is what
-    keeps a restart self-migrating, with no step for an operator to forget.
-    SQLite cannot attach a REFERENCES clause when adding a column, so the
-    foreign key stays declarative on the model.
+
+def _stamp_unversioned(connection) -> str | None:
+    """Revision an existing database is at when it predates Alembic.
+
+    Both shapes that exist in the wild are recognised: the first deployment
+    (works only) and the claiming branch (works + users, built by create_all).
     """
-    with engine.begin() as connection:
-        columns = {
-            row[1]
-            for row in connection.exec_driver_sql("PRAGMA table_info(works)")
-        }
-        if "user_id" not in columns:
-            connection.exec_driver_sql("ALTER TABLE works ADD COLUMN user_id INTEGER")
+    tables = set(inspect(connection).get_table_names())
+    if "alembic_version" in tables or "works" not in tables:
+        return None
+    return "0002" if "users" in tables else "0001"
+
+
+def migrate(target_engine=None, target: str = "head") -> None:
+    """Bring the schema up to date. Safe to run on every startup."""
+    target_engine = target_engine or engine
+    config = Config()
+    config.set_main_option("script_location", str(MIGRATIONS_DIR))
+    with target_engine.connect() as connection:
+        # Batch migrations rebuild tables by copy-and-swap, which foreign key
+        # enforcement would reject midway. The pragma only takes effect
+        # outside a transaction, hence before begin().
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        connection.commit()
+        config.attributes["connection"] = connection
+        legacy = _stamp_unversioned(connection)
+        if legacy:
+            command.stamp(config, legacy)
+        command.upgrade(config, target)
+        connection.commit()
+        connection.exec_driver_sql("PRAGMA foreign_keys=ON")
 
 
 def _adopt_orphan_profile_works(session: Session, user: User) -> bool:
@@ -134,9 +154,8 @@ def _seed_works(session: Session) -> None:
 
 
 def init_db() -> None:
-    """Create tables, migrate the one added column, and seed what is missing."""
-    Base.metadata.create_all(engine)
-    _ensure_work_user_id()
+    """Migrate the schema, then seed what is missing."""
+    migrate()
     with SessionLocal() as session:
         _seed_works(session)
         _seed_users(session)
