@@ -1,8 +1,8 @@
-"""The single profile avatar, recolored per identity.
+"""Profile pictures: an uploaded photo, or the one drawing re-tinted per account.
 
-The prototype inlined one SVG data URI in the templates. Eight testers need to
-tell each other apart at a glance, and eight PNGs would be eight more files to
-deploy, so the same drawing is re-tinted instead.
+The prototype inlined one SVG data URI in the templates. Accounts without a
+photo still need to tell each other apart at a glance, so the same drawing is
+recolored rather than shipping an image per person.
 """
 
 _TEMPLATE = (
@@ -14,10 +14,19 @@ _TEMPLATE = (
     "%3Ccircle cx='53' cy='43' r='4' fill='%23fff'/%3E%3C/svg%3E"
 )
 
-# The prototype's orange shirt, kept for every identity so the recolor reads as
+# The prototype's orange shirt, kept for every account so the recolor reads as
 # the same character rather than eight unrelated drawings.
 ACCENT = "f27c45"
 
 
 def avatar(fill: str = "d8d6ff") -> str:
     return _TEMPLATE.format(fill=fill, accent=ACCENT)
+
+
+def user_avatar(user) -> str:
+    """What an <img src> shows for this account; the default drawing for None."""
+    if user is None:
+        return avatar()
+    if user.avatar_path:
+        return "/avatars/" + user.avatar_path
+    return avatar(user.avatar_fill)

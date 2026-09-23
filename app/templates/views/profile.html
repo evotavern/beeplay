@@ -1,12 +1,24 @@
       <section class="view active" id="profileView" data-view="profile">
         <div class="profile-layout">
           <aside class="profile-card">
-            <img class="profile-avatar" src="{{ avatar(profile_user.avatar_fill) }}" alt="{{ profile_user.name }}" />
-            <div><h2>{{ profile_user.name }}</h2><div class="handle">{{ profile_user.handle }}</div><p class="profile-bio">{{ profile_user.bio }}</p></div>
-            {# 切换身份 is a plain link: it leaves the shell for the picker, the
-               same way the picker's cards come back. #}
-            <div class="profile-actions"><button data-toast="个人档案编辑器已打开">编辑个人档案</button><a class="profile-switch" href="/claim">切换身份 ↗</a></div>
+            <img class="profile-avatar" src="{{ user_avatar(profile_user) }}" alt="{{ profile_user.name }}" />
+            <div><h2>{{ profile_user.name }}</h2><div class="handle">{{ profile_user.handle }}</div>{% if profile_user.bio %}<p class="profile-bio">{{ profile_user.bio }}</p>{% endif %}</div>
+            <div class="profile-actions">
+              <button type="button" data-account-open="profile">编辑个人档案</button>
+              <a class="profile-switch" href="/u/{{ profile_user.slug }}" hx-get="/u/{{ profile_user.slug }}">查看公开主页 ↗</a>
+            </div>
             <div class="profile-stats"><div class="profile-stat"><strong>{{ works_total }}</strong><span>作品</span></div><div class="profile-stat"><strong>{{ saved_total }}</strong><span>收藏</span></div></div>
+            {# Without a password the account lives only in this browser's
+               cookie, so logging out would lose it: offer the password instead. #}
+            <div class="account-box">
+              {% if profile_user.password_hash %}
+                <p>已设置密码，可以用 <strong>{{ profile_user.handle }}</strong> 在其他设备登录。</p>
+                <div class="account-links"><button type="button" data-account-open="password">修改密码</button><button type="button" data-account-logout>退出登录</button></div>
+              {% else %}
+                <p><strong>设置密码，换设备也能登录。</strong>现在这个账号只保存在这个浏览器里。</p>
+                <div class="account-links"><button type="button" class="account-primary" data-account-open="password">设置密码</button><a href="/login" hx-get="/login">已有账号？登录</a></div>
+              {% endif %}
+            </div>
           </aside>
           <div class="profile-content">
             <div class="tabs"><button class="tab{% if tab == 'works' %} active{% endif %}" data-profile-tab="works" hx-get="/partials/profile-works?tab=works" hx-target="#profileWorkGrid" hx-push-url="false"><span>▦</span>作品</button><button class="tab{% if tab == 'likes' %} active{% endif %}" data-profile-tab="likes" hx-get="/partials/profile-works?tab=likes" hx-target="#profileWorkGrid" hx-push-url="false"><span>♥</span>喜欢</button><button class="tab{% if tab == 'saved' %} active{% endif %}" data-profile-tab="saved" hx-get="/partials/profile-works?tab=saved" hx-target="#profileWorkGrid" hx-push-url="false"><span>▣</span>收藏</button><button class="tab{% if tab == 'history' %} active{% endif %}" data-profile-tab="history" hx-get="/partials/profile-works?tab=history" hx-target="#profileWorkGrid" hx-push-url="false"><span>◷</span>历史</button></div>

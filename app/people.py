@@ -1,10 +1,10 @@
 """Which player a logged event belongs to, without logging who they are.
 
-`beeplay-ops ux` groups failures by person. A claimed identity is not a
-person (it is released after two idle hours and someone else can take it),
-so the key is the client IP plus User-Agent, keyed with a server-only secret
-and the UTC date: stable for a day, unlinkable across days, and the raw IP is
-never written anywhere.
+`beeplay-ops ux` groups failures by person. Not everyone has an account (a
+player who only plays never gets one), so the key is the client IP plus
+User-Agent, keyed with a server-only secret and the UTC date: stable for a
+day, unlinkable across days, and the raw IP is never written anywhere. When
+there is an account its permanent id goes alongside, as `who`.
 """
 
 import hashlib
@@ -52,12 +52,11 @@ def fields(request: Request) -> dict:
     site; a 404 without it is a scanner, not a player.
     """
     ip = request.client.host if request.client else "unknown"
-    identity = getattr(request.state, "identity", None)
-    user = identity[0] if identity else None
+    user = getattr(request.state, "user", None)
     result = {
         "person": person_id(ip, request.headers.get("user-agent")),
         "cookie": any(name.startswith("beeplay") for name in request.cookies),
     }
     if user is not None:
-        result["who"] = user.slug
+        result["who"] = f"u{user.id}"
     return result

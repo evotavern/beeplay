@@ -17,4 +17,5 @@ beeplay.db-wal
 beeplay.db-shm
 games/
 failed/
+avatars/
 logs/

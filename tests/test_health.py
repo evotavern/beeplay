@@ -28,8 +28,7 @@ class HealthTests(unittest.TestCase):
         for active in self.patches:
             active.start()
         user = User(
-            slug="bee-2", name="小蜜蜂", handle="@b", bio="", avatar_fill="fff",
-            level=1, xp=0, xp_goal=1, position=0,
+            slug="bee-2", name="小蜜蜂", avatar_fill="fff",
         )
         self.session.add(user)
         self.session.flush()

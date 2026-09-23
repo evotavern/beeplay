@@ -1,0 +1,13 @@
+      <section class="view active" id="loginView" data-view="login">
+        <div class="account-page">
+          <h1>登录已有账号</h1>
+          <p>用你设置密码时选的用户名登录。忘记密码？找黑客松工作人员帮你重置。</p>
+          {% if device_has_activity %}<p class="account-note">这个浏览器里的喜欢、收藏和作品会合并到你登录的账号。</p>{% endif %}
+          <form class="account-form" data-account-form="login" data-next="{{ next_url }}">
+            <label>用户名<input name="handle" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="21" required placeholder="例如 honey_lab" /></label>
+            <label>密码<input name="password" type="password" autocomplete="current-password" required /></label>
+            <p class="account-error" role="alert"></p>
+            <button class="primary-button" type="submit">登录</button>
+          </form>
+        </div>
+      </section>

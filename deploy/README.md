@@ -3,7 +3,7 @@
 Caddy owns ports 80 and 443 for the shared host. It serves BeePlay's
 `/assets/` and `/games/` from disk and proxies everything else to uvicorn on
 `127.0.0.1:8000`. The canonical site is `https://beeplay.top/` (ssh alias
-`evotavern`). Claim cookies are Secure; direct HTTP and unrecognized hosts do
+`evotavern`). Session cookies are Secure; direct HTTP and unrecognized hosts do
 not serve the application.
 
 ## One-time nginx-to-Caddy migration
@@ -71,6 +71,7 @@ Everything lives in `/var/lib/beeplay`:
 | `beeplay.db` | SQLite: users, works (with `status`), `work_events`, `health_events`, `failed_uploads` |
 | `games/<artifact>/` | one directory per uploaded version; replaced versions stay |
 | `failed/<id>.zip` | uploads that failed validation, waiting for an operator |
+| `avatars/<hash>.webp` | profile photos, re-encoded; Caddy serves them as `/avatars/` |
 | `logs/events.jsonl` | one JSON line per event; the journal has the same lines |
 | `logs/ux-last-run` | when `beeplay-ops ux` last ran |
 | `logs/person-key` | secret behind the anonymous person ids in the log; keep it private |
@@ -115,7 +116,7 @@ person, with:
   stuck players come first;
 - `saw:` what the page showed and whether the player was sent away or lost
   their input, or `saw (inferred):` where the page does not report it yet;
-- the claimed identity when there was one; "in-app only" means every report
+- the account id (`u42`, see `beeplay-ops user`) when there was one; "in-app only" means every report
   came from WeChat, QQ, Douyin or another in-app browser.
 
 A person is `p-` plus a hash of IP and User-Agent keyed with
@@ -129,7 +130,7 @@ Tracing one game or one uploader:
 
 ```bash
 grep '"work_id": 12' /var/lib/beeplay/logs/events.jsonl
-grep '"slug": "bee-3"' /var/lib/beeplay/logs/events.jsonl
+grep '"who": "u42"' /var/lib/beeplay/logs/events.jsonl
 journalctl -u beeplay -o cat | grep auto_hidden
 ```
 
@@ -141,12 +142,18 @@ once `BEEPLAY_ALERT_WEBHOOK` in `/etc/beeplay/beeplay.env` is set, then
 lark-cli app bot cannot post to the external 🐝蜂玩BeePlay group; add a custom
 bot in that group's settings and paste its webhook URL.
 
-## Tester identities
+## Accounts
 
-Claims release two hours after a tester's last request. To free them all
-before a demo round:
+Accounts are made silently on a player's first like, save, creation or visit
+to their profile; setting a password is what lets them log in elsewhere.
+There is no email or phone, so a forgotten password goes through staff:
 
 ```bash
-sudo -u beeplay sqlite3 /var/lib/beeplay/beeplay.db \
-  "UPDATE users SET last_seen_at = NULL, claim_token = NULL;"
+beeplay-ops user honey_lab          # or u42, as the ux check prints it
+beeplay-ops reset-password honey_lab  # prints a one-time link, valid 24 h
+beeplay-ops avatar-remove honey_lab   # back to the default drawing
 ```
+
+Check it is really them before handing over the link: opening it sets a new
+password and signs every device out. An account without a password has
+nothing to reset; it exists only in the browser that made it.

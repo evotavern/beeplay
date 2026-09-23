@@ -558,7 +558,6 @@
     .profile-actions button,
     .profile-actions .profile-switch { min-height: 44px; border-radius: 999px; border: 1px solid var(--line); background: var(--white); color: var(--ink); font-weight: 850; }
     .profile-actions button:first-child { background: var(--ink); color: var(--white); border-color: var(--ink); }
-    /* A link rather than a button, so it leaves the htmx shell for /claim. */
     .profile-actions .profile-switch { display: grid; place-items: center; text-decoration: none; }
     .profile-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; margin-top: 16px; }
     .profile-stat { padding: 12px; background: var(--white); border-radius: 16px; }
@@ -668,9 +667,6 @@
     /* The toast ignores the pointer so it never blocks the feed; only its link takes taps. */
     .toast a { margin-left: 8px; color: var(--lime); }
     .toast.show a { pointer-events: auto; }
-    /* Unclaimed visitors: still clickable, so the click can explain why. */
-    [data-action="create"][aria-disabled="true"] { opacity: 0.45; box-shadow: none; }
-    [data-action="create"][aria-disabled="true"]:hover { transform: none; box-shadow: none; }
 
     @media (min-width: 981px) {
       .bottom-nav { display: none; }
@@ -990,13 +986,13 @@
       font-size: 12px;
       font-weight: 800;
     }
-    body.mobile-preview .game-author::before {
-      content: "";
+    body.mobile-preview .game-author { color: inherit; text-decoration: none; }
+    body.mobile-preview .game-author img {
       width: 24px;
       height: 24px;
       border-radius: 50%;
-      background: var(--lime);
-      box-shadow: inset 0 0 0 4px rgba(255,255,255,0.35);
+      object-fit: cover;
+      box-shadow: 0 0 0 2px rgba(255,255,255,0.35);
     }
     body.mobile-preview .game-actions {
       position: absolute;
@@ -1097,38 +1093,6 @@
         box-shadow: 0 20px 80px rgba(48, 62, 18, 0.2);
       }
     }
-
-    /* Identity picker. Reached by a plain link, so it is a full document
-       rendered inside the usual shell rather than an htmx swap. */
-    .claim-layout { padding: 20px 16px 40px; display: grid; gap: 20px; }
-    .claim-head h1 { margin: 0 0 6px; font-size: 24px; }
-    .claim-head p { margin: 0; color: #6b6f6e; font-size: 14px; line-height: 1.5; }
-    .claim-notice {
-      margin-top: 12px; padding: 10px 14px; border-radius: 14px;
-      background: #fff3d6; color: #7a5a12; font-size: 13px; line-height: 1.5;
-    }
-    .claim-grid {
-      display: grid; gap: 12px;
-      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    }
-    .claim-card {
-      display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
-      width: 100%; padding: 16px; border-radius: 20px; background: #fff;
-      border: 1px solid #ecebe8; text-decoration: none; color: inherit;
-      font: inherit; text-align: left; transition: transform .12s ease, border-color .12s ease;
-    }
-    .claim-action { margin: 0; }
-    .claim-card:hover { transform: translateY(-2px); border-color: var(--lime, #d7f36b); }
-    .claim-card.mine { border-color: #171b1a; border-width: 2px; }
-    /* Taken identities are a div, not a link, so there is nothing to tap. */
-    .claim-card.taken { opacity: .45; }
-    .claim-card.taken:hover { transform: none; border-color: #ecebe8; }
-    .claim-avatar { width: 56px; height: 56px; border-radius: 18px; }
-    .claim-card strong { font-size: 15px; }
-    .claim-handle { font-size: 12px; color: #9a9d9b; }
-    .claim-bio { margin: 0; font-size: 12px; color: #6b6f6e; line-height: 1.45; }
-    .claim-state { margin-top: 4px; font-size: 11px; color: #9a9d9b; }
-    .claim-card.mine .claim-state { color: #171b1a; font-weight: 600; }
 
     /* Double's mobile layout: a fixed game viewport above one connected,
        swipeable information/action/navigation assembly. Games never receive
@@ -1250,16 +1214,19 @@
     .tray-action:first-child.active svg { fill: currentColor; }
     .tray-action small { overflow: hidden; color: inherit; font-size: 9px; font-weight: 850; text-overflow: ellipsis; }
     .tray-action.active { background: var(--lime); color: var(--ink); }
-    .bottom-nav {
+    /* One bottom nav on every page: solid, so it reads the same over the dark
+       feed tray and over the light pages, and laid out the same everywhere. */
+    body.mobile-preview .bottom-nav {
       width: min(402px, calc(100% - 20px)); bottom: max(7px, env(safe-area-inset-bottom));
-      padding: 5px; border: 1px solid rgba(255,255,255,.09); background: rgba(255,255,255,.075);
-      box-shadow: none; backdrop-filter: none;
+      padding: 5px; border: 1px solid rgba(255,255,255,.09); background: rgba(23,27,26,0.94);
+      box-shadow: 0 12px 30px rgba(23,27,26,0.22); backdrop-filter: none;
     }
-    body.mobile-preview.feed-mode .bottom-nav { background: rgba(255,255,255,.075); }
-    body.mobile-preview.feed-mode .nav-items { width: 100%; justify-content: space-between; }
-    body.mobile-preview.feed-mode .nav-item { height: 38px; }
-    body.mobile-preview.feed-mode .floating-create { width: 44px; height: 44px; font-size: 25px; box-shadow: none; }
-    body.mobile-preview .bottom-spacer { display: none; }
+    body.mobile-preview .nav-items { width: 100%; justify-content: space-between; }
+    body.mobile-preview .nav-item { height: 38px; }
+    body.mobile-preview .floating-create { width: 44px; height: 44px; font-size: 25px; box-shadow: none; }
+    /* The feed tray already reserves room for the nav; other pages scroll
+       their last row clear of it. */
+    body.mobile-preview.feed-mode .bottom-spacer { display: none; }
 
     .comments-backdrop {
       position: fixed; inset: 0; z-index: 90; display: none; align-items: flex-end;
@@ -1276,8 +1243,8 @@
     .comments-close { width: 34px; height: 34px; border: 0; border-radius: 50%; background: var(--white); font-size: 20px; }
     .comments-list { display: grid; gap: 12px; overflow: auto; padding: 16px 18px; }
     .comment-item { display: grid; grid-template-columns: 34px minmax(0,1fr) auto; gap: 10px; align-items: start; }
-    .comment-avatar { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 50%; color: #fff; font-size: 12px; font-weight: 900; }
-    .comment-copy strong { font-size: 12px; }
+    .comment-avatar { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; }
+    .comment-author { color: inherit; font-size: 12px; font-weight: 850; text-decoration: none; }
     .comment-copy p { margin: 3px 0 0; font-size: 13px; line-height: 1.4; }
     .comment-like { border: 0; background: transparent; color: var(--muted); font-size: 11px; }
     .comment-like.active { color: #d84d66; }
@@ -1296,7 +1263,7 @@
     }
     .discover-search-top { padding: 16px 14px 10px; }
     .discover-search-top .search-box { width: 100%; }
-    body.mobile-preview #discoverView { padding: 0 14px 110px; }
+    body.mobile-preview #discoverView { padding: 0 14px; }
     body.mobile-preview #discoverView .discover-search-top { margin: 0 -14px; }
     body.mobile-preview #discoverView .feature-card { min-height: 330px; }
     body.mobile-preview #discoverView .category-section { margin-top: 22px; }
@@ -1308,7 +1275,7 @@
     body.mobile-preview #discoverView .category-row::-webkit-scrollbar { display: none; }
     body.mobile-preview #discoverView .work-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
     body.mobile-preview .game-tray .game-author::before { display: none; }
-    body.mobile-preview #profileView { padding: 18px 16px 110px; }
+    body.mobile-preview #profileView { padding: 18px 16px 0; }
     body.mobile-preview #profileView .profile-layout { display: block; }
     body.mobile-preview #profileView .profile-card {
       display: grid; grid-template-columns: 86px minmax(0,1fr); gap: 12px 16px;
@@ -1335,6 +1302,7 @@
     body.mobile-preview #profileView .profile-work-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin-top: 12px; }
   </style>
   <link rel="stylesheet" href="{{ asset('css/generation.css') }}">
+  <link rel="stylesheet" href="{{ asset('css/account.css') }}">
 </head>
 <body class="mobile-preview{% if view == 'home' %} feed-mode{% endif %}"
       hx-target="#viewport" hx-swap="innerHTML" hx-push-url="true"
@@ -1354,7 +1322,7 @@
         <button class="nav-link{% if view == 'messages' %} active{% endif %}" data-view-target="messages" hx-get="/messages">消息</button>
         <button class="nav-link{% if view == 'profile' %} active{% endif %}" data-view-target="profile" hx-get="/profile">个人</button>
       </nav>
-      <button class="desktop-create" data-action="create" aria-label="开始创建"{% if not current_user %} aria-disabled="true"{% endif %}><span>+</span><span>开始创建</span></button>
+      <button class="desktop-create" data-action="create" aria-label="开始创建"><span>+</span><span>开始创建</span></button>
       <div class="topbar-actions">
         <button class="credit-pill" id="creditPill" aria-label="查看蜂蜜积分"><span class="credit-dot">✦</span><span>1,000</span></button>
         <button class="icon-button" id="notificationButton" data-view-target="messages" hx-get="/messages" aria-label="查看消息">
@@ -1363,7 +1331,7 @@
           </svg>
         </button>
         <button class="avatar-button" data-view-target="profile" hx-get="/profile" aria-label="查看个人主页">
-          <img src="{{ avatar(current_user.avatar_fill) if current_user else avatar() }}" alt="{{ current_user.name if current_user else '选择身份' }}" />
+          <img id="headerAvatar" src="{{ user_avatar(current_user) }}" alt="{{ current_user.name if current_user else '个人主页' }}" />
         </button>
       </div>
     </header>
@@ -1391,7 +1359,7 @@
       <button class="nav-item{% if view == 'discover' %} active{% endif %}" data-view-target="discover" hx-get="/discover" aria-label="探索">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m15.4 8.6-2.1 4.7-4.7 2.1 2.1-4.7 4.7-2.1Z"/></svg>
       </button>
-      <button class="floating-create" data-action="create" aria-label="开始创作"{% if not current_user %} aria-disabled="true"{% endif %}>+</button>
+      <button class="floating-create" data-action="create" aria-label="开始创作">+</button>
       <button class="nav-item{% if view == 'messages' %} active{% endif %}" data-view-target="messages" hx-get="/messages" aria-label="消息"><span style="font-size: 22px;">♧</span><span class="dot" aria-hidden="true"></span></button>
       <button class="nav-item{% if view == 'profile' %} active{% endif %}" data-view-target="profile" hx-get="/profile" aria-label="个人"><span style="font-size: 22px;">●</span></button>
     </div>
@@ -1444,11 +1412,16 @@
     </section>
   </div>
 
+  <!-- Profile and password editors, fetched fresh into here when opened.
+       Body level so the first-publish prompt can show over any view. -->
+  <div class="modal-backdrop" id="accountSheet"></div>
+
   <div class="toast" id="toast" role="status"></div>
 
   <script src="{{ asset('js/page-reporter.js') }}"></script>
   <script src="{{ asset('vendor/htmx.min.js') }}"></script>
   <script src="{{ asset('js/app.js') }}"></script>
   <script src="{{ asset('js/generation.js') }}"></script>
+  <script src="{{ asset('js/account.js') }}"></script>
 </body>
 </html>

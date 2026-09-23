@@ -1,11 +1,9 @@
-import secrets
-from datetime import datetime, timedelta
-
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.avatars import user_avatar
 from app.data import CATEGORIES
 from app.models import (
     CommentLike,
@@ -19,19 +17,6 @@ from app.models import (
     WorkView,
     utcnow,
 )
-
-# A claim survives this long past the tester's last request. It is never
-# written down as an expiry: `is_claimed` compares, so a claim that has gone
-# stale is free the instant it is looked at, with no job to run.
-CLAIM_TTL = timedelta(hours=2)
-
-# last_seen_at is only rewritten once it is this stale. Every htmx partial
-# fetch would otherwise be a write, and SQLite has a single writer; five
-# minutes is invisible against a two hour window.
-TOUCH_INTERVAL = timedelta(minutes=5)
-
-COOKIE_NAME = "beeplay_user"
-
 
 def _with_social_state(
     session: Session, works: list[Work], viewer: User | None
@@ -168,6 +153,31 @@ def viewed_works(session: Session, user: User) -> list[Work]:
     return _with_social_state(session, works, user)
 
 
+def public_works(session: Session, owner: User, viewer: User | None) -> list[Work]:
+    """What /u/<handle> shows: only their games that are live in the feed."""
+    works = list(
+        session.scalars(
+            _live_works()
+            .where(Work.user_id == owner.id)
+            .order_by(Work.created_at.desc(), Work.id.desc())
+        )
+    )
+    return _with_social_state(session, works, viewer)
+
+
+def likes_received(session: Session, owner: User) -> int:
+    return session.scalar(
+        select(func.count())
+        .select_from(WorkLike)
+        .join(Work, Work.id == WorkLike.work_id)
+        .where(Work.user_id == owner.id, Work.status == "live")
+    )
+
+
+def user_by_handle(session: Session, slug: str) -> User | None:
+    return session.scalar(select(User).where(User.slug == slug.lower()))
+
+
 def works_count(session: Session, user: User) -> int:
     return session.scalar(select(func.count()).select_from(_owned_by(user).subquery()))
 
@@ -268,14 +278,23 @@ def comments_for_work(session: Session, viewer: User | None, work_id: int) -> li
             CommentLike.user_id == viewer.id, CommentLike.comment_id.in_(comment_ids)
         )
     )) if viewer is not None and comment_ids else set()
-    return [{
+    return [
+        comment_payload(comment, author, likes=counts.get(comment.id, 0), liked=comment.id in liked)
+        for comment, author in rows
+    ]
+
+
+def comment_payload(comment: WorkComment, author: User, *, likes: int, liked: bool) -> dict:
+    """A comment as the feed's comment sheet shows it: the author as they read now."""
+    return {
         "id": comment.id,
         "author": author.name,
-        "avatar": author.avatar_fill,
+        "handle": author.slug,
+        "avatar": user_avatar(author),
         "content": comment.content,
-        "likes": counts.get(comment.id, 0),
-        "liked": comment.id in liked,
-    } for comment, author in rows]
+        "likes": likes,
+        "liked": liked,
+    }
 
 
 def add_comment(session: Session, user: User, work_id: int, content: str) -> WorkComment:
@@ -353,126 +372,3 @@ def record_share(
     return session.scalar(
         select(func.count()).select_from(WorkShare).where(WorkShare.work_id == work_id)
     )
-
-
-# --- identities ------------------------------------------------------------
-
-
-def is_claimed(user: User, now: datetime | None = None) -> bool:
-    now = now or utcnow()
-    return user.last_seen_at is not None and user.last_seen_at > now - CLAIM_TTL
-
-
-def all_users(session: Session) -> list[User]:
-    """Every claimable identity, in grid order."""
-    return list(
-        session.scalars(select(User).where(User.claimable).order_by(User.position))
-    )
-
-
-def next_free_at(session: Session) -> datetime | None:
-    """When the longest-idle live claim lapses, or None if one is free now."""
-    users = all_users(session)
-    live = [user for user in users if is_claimed(user)]
-    if len(live) < len(users):
-        return None
-    return min(user.last_seen_at for user in live) + CLAIM_TTL
-
-
-def claim(session: Session, slug: str, holder: User | None = None) -> str | None:
-    """Take an identity, returning its new claim token, or None if it is taken.
-
-    The guard lives in the UPDATE's WHERE clause rather than in a read followed
-    by a write, so two testers tapping the same card at once cannot both win.
-    """
-    user = session.scalar(select(User).where(User.slug == slug, User.claimable))
-    if user is None:
-        return None
-
-    now = utcnow()
-    holder_token = holder.claim_token if holder is not None else None
-    if holder is not None and holder.id == user.id:
-        # Already theirs. Refresh rather than reissue, so the cookie they are
-        # holding stays valid.
-        renewed = session.execute(
-            update(User)
-            .where(User.id == user.id, User.claim_token == holder_token)
-            .values(last_seen_at=now)
-        )
-        if renewed.rowcount != 1:
-            session.rollback()
-            return None
-        session.commit()
-        return holder_token
-
-    # This is a bearer credential, not merely an opaque display ID. 256 bits
-    # makes guessing it infeasible even if the claim endpoint is exposed.
-    token = secrets.token_hex(32)
-    taken = session.execute(
-        update(User)
-        .where(
-            User.id == user.id,
-            or_(User.last_seen_at.is_(None), User.last_seen_at <= now - CLAIM_TTL),
-        )
-        .values(claim_token=token, last_seen_at=now)
-    )
-    if taken.rowcount == 0:
-        session.rollback()
-        return None
-
-    # Switching identities frees the old one immediately. Guard the release by
-    # the token that authenticated this request: two concurrent requests from
-    # one browser must not each reserve a new identity and strand one of them.
-    if holder is not None:
-        released = session.execute(
-            update(User)
-            .where(User.id == holder.id, User.claim_token == holder_token)
-            .values(last_seen_at=None, claim_token=None)
-        )
-        if released.rowcount != 1:
-            session.rollback()
-            return None
-
-    session.commit()
-    session.refresh(user)
-    return token
-
-
-def touch(session: Session, user: User) -> None:
-    now = utcnow()
-    if user.last_seen_at is None or user.last_seen_at <= now - TOUCH_INTERVAL:
-        user.last_seen_at = now
-        session.commit()
-
-
-def cookie_value(slug: str, token: str) -> str:
-    """The one place the cookie's shape is written down; resolve_cookie reads it."""
-    return f"{slug}.{token}"
-
-
-def resolve_cookie(session: Session, raw: str | None) -> tuple[User | None, str]:
-    """Turn a cookie into the current user plus why it failed if it did.
-
-    Status is one of "ok", "anonymous" (no usable cookie) or "stolen" (the
-    identity expired while they were away and somebody else took it).
-    """
-    if not raw or "." not in raw:
-        return None, "anonymous"
-
-    slug, _, token = raw.partition(".")
-    user = session.scalar(select(User).where(User.slug == slug))
-    if user is None:
-        return None, "anonymous"
-
-    if user.claim_token != token:
-        return None, "stolen" if is_claimed(user) else "anonymous"
-
-    if not is_claimed(user):
-        # Their claim lapsed but nobody took it, so let them pick it back up
-        # rather than bouncing them to a grid where they would choose it again.
-        user.last_seen_at = utcnow()
-        session.commit()
-        return user, "ok"
-
-    touch(session, user)
-    return user, "ok"

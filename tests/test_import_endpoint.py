@@ -35,8 +35,7 @@ class ImportEndpointTests(unittest.TestCase):
         Base.metadata.create_all(self.engine)
         self.session = Session(self.engine)
         self.user = User(
-            slug="bee-2", name="小蜜蜂", handle="@b", bio="", avatar_fill="fff",
-            level=1, xp=0, xp_goal=1, position=0,
+            slug="bee-2", name="小蜜蜂", avatar_fill="fff",
         )
         self.session.add(self.user)
         self.session.commit()
@@ -58,18 +57,18 @@ class ImportEndpointTests(unittest.TestCase):
         self.engine.dispose()
         self.directory.cleanup()
 
-    def call(self, identity=None, **fields):
+    def call(self, **fields):
         # Called directly, so FastAPI's File()/Form() defaults must be overridden.
         return main.import_game(
             **{"bundle": None, "files": None, "paths": None, **DETAILS, **fields},
             session=self.session,
-            identity=identity or (self.user, "ok"),
+            user=self.user,
         )
 
     def test_publishes_a_zip_live_under_the_uploader(self) -> None:
         response = self.call(bundle=upload(zip_bundle({"dist/index.html": "<h1>Game</h1>"})))
 
-        payload = json.loads(response.body)
+        payload = response
         game = self.session.scalar(select(Work).where(Work.artifact_hash == payload["artifact"]))
         self.assertEqual((game.title, game.status, game.user_id), ("My game", "live", self.user.id))
         self.assertTrue((config.GAMES_DIR / payload["artifact"] / "index.html").is_file())
@@ -79,7 +78,7 @@ class ImportEndpointTests(unittest.TestCase):
         response = self.call(
             files=[upload(b"<h1>Game</h1>", "index.html")], paths=["dist/index.html"]
         )
-        self.assertEqual(json.loads(response.body)["title"], "My game")
+        self.assertEqual(response["title"], "My game")
 
     def test_a_broken_zip_is_kept_and_the_uploader_is_sent_to_staff(self) -> None:
         with self.assertRaises(HTTPException) as raised:
@@ -107,11 +106,10 @@ class ImportEndpointTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 422)
         self.assertIsNone(self.session.scalar(select(FailedUpload)))
 
-    def test_an_unclaimed_visitor_is_sent_to_claim_an_identity(self) -> None:
-        with self.assertRaises(HTTPException) as raised:
-            self.call(identity=(None, "anonymous"), bundle=upload(zip_bundle({"index.html": "x"})))
-
-        self.assertEqual(raised.exception.status_code, 401)
+    def test_the_first_publish_asks_for_a_name_once(self) -> None:
+        first = self.call(bundle=upload(zip_bundle({"index.html": "<h1>1</h1>"})))
+        second = self.call(bundle=upload(zip_bundle({"index.html": "<h1>2</h1>"})))
+        self.assertEqual((first["ask_profile"], second["ask_profile"]), (True, False))
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ from unittest.mock import patch
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app import config, db, events, ingest, ops
+from app import accounts, config, db, events, ingest, ops
 from app.game_imports import REPORTER_MARKER, pack_zip
 from app.models import FailedUpload, User, Work, WorkEvent
 
@@ -32,8 +32,7 @@ class OpsTests(unittest.TestCase):
             active.start()
         with Session(self.engine) as session:
             session.add(User(
-                slug="bee-2", name="小蜜蜂", handle="@b", bio="", avatar_fill="fff",
-                level=1, xp=0, xp_goal=1, position=0,
+                slug="bee-2", name="小蜜蜂", avatar_fill="fff",
             ))
             session.commit()
         self.game = self.root / "fixed-game"
@@ -57,6 +56,30 @@ class OpsTests(unittest.TestCase):
 
     def session(self) -> Session:
         return Session(self.engine)
+
+    def test_reset_password_prints_a_one_time_link_for_accounts_with_one(self) -> None:
+        with self.session() as session:
+            user = session.scalar(select(User).where(User.slug == "bee-2"))
+            with self.assertRaises(SystemExit):
+                ops.main(["reset-password", "bee-2"])  # no password: nothing to reset
+            accounts.set_password(session, user, None, password="honey123", handle="honey_lab")
+            user_id = user.id
+        link = self.run_ops("reset-password", "@honey_lab").splitlines()[0]
+        self.assertRegex(link, r"/reset\?token=[\w-]+$")
+        token = link.split("token=")[1]
+        with self.session() as session:
+            self.assertEqual(accounts.reset_target(session, token).id, user_id)
+        # The ux check prints u<id>; the same account answers to it.
+        self.assertIn("@honey_lab", self.run_ops("user", f"u{user_id}"))
+
+    def test_avatar_remove_restores_the_default(self) -> None:
+        with self.session() as session:
+            user = session.scalar(select(User).where(User.slug == "bee-2"))
+            user.avatar_path = "0123456789abcdef.webp"
+            session.commit()
+        self.assertIn("removed 0123456789abcdef.webp", self.run_ops("avatar-remove", "bee-2"))
+        with self.session() as session:
+            self.assertIsNone(session.scalar(select(User.avatar_path).where(User.slug == "bee-2")))
 
     def test_import_a_folder_for_a_user(self) -> None:
         self.run_ops(

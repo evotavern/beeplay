@@ -7,7 +7,7 @@ from alembic.config import Config
 from sqlalchemy import create_engine, event, func, inspect, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.data import FEED_GAMES, HOUSE_USER, USERS
+from app.data import FEED_GAMES, HOUSE_USER
 from app.models import User, Work
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -47,7 +47,7 @@ def get_session() -> Iterator[Session]:
 
 
 MIGRATIONS_DIR = BASE_DIR / "migrations"
-HEAD_REVISION = "0008"
+HEAD_REVISION = "0009"
 
 
 def _stamp_unversioned(connection) -> str | None:
@@ -82,14 +82,10 @@ def migrate(target_engine=None, target: str = "head") -> None:
         connection.exec_driver_sql("PRAGMA foreign_keys=ON")
 
 
-def _seed_users(session: Session) -> None:
-    """Insert any identity that is missing, keyed on slug."""
-    existing = set(session.scalars(select(User.slug)))
-    for position, fixture in enumerate(USERS):
-        if fixture["slug"] not in existing:
-            session.add(User(**fixture, position=position))
-    if HOUSE_USER["slug"] not in existing:
-        session.add(User(**HOUSE_USER, position=len(USERS), claimable=False))
+def _seed_house(session: Session) -> None:
+    """The one fixed account, owner of the team's games; everyone else signs up."""
+    if session.scalar(select(User).where(User.slug == HOUSE_USER["slug"])) is None:
+        session.add(User(**HOUSE_USER, loginable=False, handle_locked=True))
     session.commit()
 
 
@@ -112,5 +108,5 @@ def init_db() -> None:
     """Migrate the schema, then seed what is missing."""
     migrate()
     with SessionLocal() as session:
-        _seed_users(session)
+        _seed_house(session)
         _seed_feed(session)

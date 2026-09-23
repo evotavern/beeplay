@@ -19,6 +19,10 @@ def _path(name: str, default: Path) -> Path:
 GAMES_DIR = _path("BEEPLAY_GAMES_DIR", BASE_DIR / "games")
 # Raw bundles that failed validation, kept for an operator to fix.
 FAILED_DIR = _path("BEEPLAY_FAILED_DIR", BASE_DIR / "failed")
+# Profile photos, one re-encoded WebP per distinct image. Next to the games by
+# default: the deployed env file predates this setting and is never
+# overwritten, and the code directory is read-only there.
+AVATARS_DIR = _path("BEEPLAY_AVATARS_DIR", GAMES_DIR.parent / "avatars")
 # One JSON line per event; the journal gets the same lines but may rotate.
 EVENTS_LOG = _path("BEEPLAY_EVENTS_LOG", BASE_DIR / "logs" / "events.jsonl")
 

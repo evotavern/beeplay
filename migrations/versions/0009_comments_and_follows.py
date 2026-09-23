@@ -1,14 +1,14 @@
-"""Persist the small social layer used by the eight demo identities.
+"""Persist comments, comment likes and follows between accounts.
 
-Revision ID: 0008
-Revises: 0007
+Revision ID: 0009
+Revises: 0008
 Create Date: 2026-09-23
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0008"
-down_revision = "0007"
+revision = "0009"
+down_revision = "0008"
 branch_labels = None
 depends_on = None
 
