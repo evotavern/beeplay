@@ -137,10 +137,10 @@ class OpsTests(unittest.TestCase):
         self.assertIn("never checked before", report)
         self.assertIn("POST /api/import-game → 422", report)
         self.assertIn("work 7: script failed to load", report)
-        self.assertIn("wechat 1", report)
         self.assertIn("in-app only", report)
         self.assertIn("unresolved failed uploads: 1", report)
-        self.assertIn("other: 1 failure", report)
+        self.assertIn("other: nothing", report)
+        self.assertIn("noise hidden: 1", report)
         self.assertNotIn("favicon", report)
 
     def test_ux_records_the_run_and_every_skips_until_it_is_due(self) -> None:
@@ -181,20 +181,28 @@ class OpsTests(unittest.TestCase):
         self.assertTrue((legacy / "index.html").is_file())
         self.assertEqual(len(replaced), 1)
 
-    def test_refresh_reporter_does_not_reactivate_hidden_games(self) -> None:
-        legacy = config.GAMES_DIR / "hidden-artifact"
-        legacy.mkdir(parents=True)
-        (legacy / "index.html").write_text("<html><head></head></html>")
+    def test_refresh_reporter_updates_an_old_reporter_and_keeps_hidden_games_hidden(self) -> None:
+        stale = config.GAMES_DIR / "5fa1e0000000000000000000000000aa"
+        stale.mkdir(parents=True)
+        (stale / "index.html").write_bytes(
+            b"<html><head>" + REPORTER_MARKER + b"<script>oldReporter()</script></head></html>"
+        )
         with self.session() as session:
             session.add(Work(
-                title="Hidden", author="A", category="c", emoji="🎮", art="art-one",
-                collection="feed", artifact_hash="hidden-artifact", status="hidden",
+                title="Stones", author="bee-3", category="relax", emoji="🪨", art="art-one",
+                collection="feed", artifact_hash=stale.name, status="hidden",
             ))
             session.commit()
 
         self.run_ops("refresh-reporter")
+
         with self.session() as session:
-            self.assertEqual(session.scalar(select(Work.status)), "hidden")
+            work = session.scalar(select(Work))
+        index = (config.GAMES_DIR / work.artifact_hash / "index.html").read_bytes()
+        self.assertNotEqual(work.artifact_hash, stale.name)
+        self.assertNotIn(b"oldReporter", index)
+        self.assertIn(b"beeplayHost", index)
+        self.assertEqual(work.status, "hidden")
 
 
 if __name__ == "__main__":

@@ -8,8 +8,9 @@ from contextlib import asynccontextmanager
 from math import ceil
 from pathlib import Path
 from typing import Literal
+from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -20,8 +21,10 @@ from starlette.concurrency import run_in_threadpool
 from app.avatars import avatar
 from app.data import PROFILE_TABS
 from app.db import get_session, init_db
-from app import browsers, config, events, health, ingest
+from app import browsers, config, events, generation, health, ingest, people, ux
 from app.game_imports import GameImportError, pack_zip, read_zip
+from app.generation_routes import router as generation_router
+from app.identity import current_identity
 from app.models import User
 from app.repository import (
     COOKIE_NAME,
@@ -38,7 +41,6 @@ from app.repository import (
     profile_works,
     record_share,
     record_view,
-    resolve_cookie,
     saved_count,
     saved_works,
     set_like,
@@ -78,21 +80,31 @@ ALLOW_INSECURE_CLAIMS = os.environ.get("BEEPLAY_ALLOW_INSECURE_CLAIMS") == "1"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    yield
-
-
-def current_identity(
-    request: Request, session: Session = Depends(get_session)
-) -> tuple[User | None, str]:
-    """Resolve the claim cookie once per request and stash it for templates."""
-    identity = resolve_cookie(session, request.cookies.get(COOKIE_NAME))
-    request.state.identity = identity
-    return identity
+    worker = generation.Worker()
+    worker.start()
+    try:
+        yield
+    finally:
+        worker.close()
 
 
 def claims_are_secure(request: Request) -> bool:
     """Whether this request may issue or use a bearer claim cookie."""
     return request.url.scheme == "https" or ALLOW_INSECURE_CLAIMS
+
+
+def local_path(target: str) -> str:
+    """Where to land after a claim: a path on this site, never another host.
+
+    "//host" and "/\\host" are protocol-relative in browsers, so a bare
+    leading slash is not enough to stay on this origin. Browsers also drop
+    tabs and newlines from URLs, which would turn "/\\t/host" into "//host".
+    """
+    if any(char <= " " for char in target):
+        return "/"
+    if target.startswith("/") and not target.startswith(("//", "/\\")):
+        return target
+    return "/"
 
 
 def csrf_token(request: Request) -> tuple[str, bool]:
@@ -125,12 +137,18 @@ async def log_failed_requests(request: Request, call_next) -> Response:
     except Exception as error:
         await run_in_threadpool(
             events.log_event, "http_error", **where, status=500,
-            error=repr(error)[:500], **client,
+            error=repr(error)[:500], **client, **people.fields(request),
         )
         raise
     if response.status_code >= 400:
         await run_in_threadpool(
-            events.log_event, "http_error", **where, status=response.status_code, **client
+            events.log_event, "http_error", **where, status=response.status_code,
+            **client, **people.fields(request),
+        )
+    elif ux.is_creation_success(request.method, request.url.path):
+        # Lets the check tell a player who got through from one still stuck.
+        await run_in_threadpool(
+            events.log_event, "creation_ok", **where, **client, **people.fields(request)
         )
     return response
 
@@ -139,7 +157,19 @@ app.mount("/assets", StaticFiles(directory=BASE_DIR / "assets"), name="assets")
 
 # Development convenience: in production Caddy serves /games/* straight from
 # disk, so game files never go through uvicorn's threadpool.
-app.mount("/games", StaticFiles(directory=GAMES_DIR), name="games")
+class GameFiles(StaticFiles):
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        # Match the in-app sandbox even when an artifact is opened directly.
+        response.headers["Content-Security-Policy"] = "sandbox allow-scripts"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        # The sandbox's opaque origin fetches the game's own files from
+        # Origin: null; see deploy/beeplay.caddy.
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        return response
+
+
+app.mount("/games", GameFiles(directory=GAMES_DIR), name="games")
 
 @lru_cache
 def asset(path: str) -> str:
@@ -268,6 +298,7 @@ def messages(request: Request) -> HTMLResponse:
 def claim_grid(
     request: Request,
     notice: str | None = None,
+    next_url: str = Query("/", alias="next"),
     session: Session = Depends(get_session),
     identity: tuple[User | None, str] = Depends(current_identity),
 ) -> HTMLResponse:
@@ -289,6 +320,7 @@ def claim_grid(
             "claims_enabled": claims_are_secure(request),
             "csrf_token": token,
             "notice": notice,
+            "next_url": local_path(next_url),
             "identities": [
                 {
                     "user": candidate,
@@ -319,6 +351,7 @@ def claim_identity(
     slug: str,
     request: Request,
     csrf_token: str = "",
+    next_url: str = Query("/", alias="next"),
     session: Session = Depends(get_session),
     identity: tuple[User | None, str] = Depends(current_identity),
 ) -> Response:
@@ -330,10 +363,11 @@ def claim_identity(
 
     holder, _ = identity
     token = claim(session, slug, holder)
+    target = local_path(next_url)
     if token is None:
-        return redirect(request, "/claim?notice=taken")
+        return redirect(request, "/claim?notice=taken&next=" + quote(target, safe="/"))
 
-    response = redirect(request, "/")
+    response = redirect(request, target)
     response.set_cookie(
         COOKIE_NAME,
         cookie_value(slug, token),
@@ -617,6 +651,7 @@ def game_health(
             elapsed_ms=report.elapsed_ms,
             detail=report.detail,
             user_agent=request.headers.get("user-agent"),
+            person=people.fields(request),
         )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -626,8 +661,14 @@ def game_health(
 class ClientError(BaseModel):
     """A failure the page itself saw; sent by assets/js/page-reporter.js."""
 
-    kind: Literal["error", "rejection", "script", "upload"]
+    # "shown" is not a failure of its own: it records the message a failure
+    # put in front of the player and what happened to them next.
+    kind: Literal["error", "rejection", "script", "upload", "shown"]
     message: str = Field(max_length=1000)
+    area: Literal["creation", "gameplay"] | None = None
+    next: Literal["stayed", "redirected", "closed"] | None = None
+    lost: bool | None = None
+    status: int | None = None
     page: str | None = Field(default=None, max_length=300)
     source: str | None = Field(default=None, max_length=500)
     line: int | None = None
@@ -647,6 +688,7 @@ def client_error(report: ClientError, request: Request) -> Response:
         "client_error",
         **report.model_dump(exclude_none=True),
         **browsers.fields(request.headers.get("user-agent")),
+        **people.fields(request),
     )
     return Response(status_code=204)
 
@@ -657,4 +699,15 @@ def _bounce_to_claim(request: Request, status: str) -> Response:
     response = redirect(request, target)
     if status == "stolen":
         response.delete_cookie(COOKIE_NAME)
+    return response
+
+
+app.include_router(generation_router)
+
+
+@app.middleware("http")
+async def private_generation_responses(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/api/generations"):
+        response.headers["Cache-Control"] = "no-store"
     return response

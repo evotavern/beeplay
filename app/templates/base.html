@@ -661,16 +661,16 @@
     .import-progress { width: 100%; height: 8px; margin: -4px 0 0; accent-color: var(--lime-dark); }
     .import-status { min-height: 17px; margin: -5px 0 0; color: var(--muted); font-size: 12px; text-align: center; }
 
-    /* Game host. Full-bleed and above the nav, so the game gets the whole
-       viewport rather than a card-sized box with beeplay chrome around it.
-       Sits below .toast so notifications stay visible over a running game. */
-    #gameHost { position: fixed; inset: 0; z-index: 60; background: var(--ink); }
-    #gameHost iframe { width: 100%; height: 100%; border: 0; display: block; }
-    /* The card's own Ⅱ is underneath this overlay and unreachable, so the stop
-       control belongs to the host. */
-    #gameStop { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 14px); right: 14px; z-index: 1; width: 40px; height: 40px; border: 0; border-radius: 50%; background: rgba(23,27,26,0.62); color: var(--white); font-size: 20px; line-height: 1; }
     .toast { position: fixed; z-index: 80; left: 50%; bottom: 104px; transform: translate(-50%, 16px); padding: 12px 16px; color: var(--white); background: var(--ink); border-radius: 999px; font-size: 13px; font-weight: 800; opacity: 0; pointer-events: none; transition: opacity 180ms ease, transform 180ms ease; }
     .toast.show { opacity: 1; transform: translate(-50%, 0); }
+    /* left: 50% would otherwise cap the width at half the screen and wrap longer toasts. */
+    .toast { width: max-content; max-width: calc(100vw - 32px); }
+    /* The toast ignores the pointer so it never blocks the feed; only its link takes taps. */
+    .toast a { margin-left: 8px; color: var(--lime); }
+    .toast.show a { pointer-events: auto; }
+    /* Unclaimed visitors: still clickable, so the click can explain why. */
+    [data-action="create"][aria-disabled="true"] { opacity: 0.45; box-shadow: none; }
+    [data-action="create"][aria-disabled="true"]:hover { transform: none; box-shadow: none; }
 
     @media (min-width: 981px) {
       .bottom-nav { display: none; }
@@ -1098,15 +1098,6 @@
       }
     }
 
-    /* Feed lock while a game is running. These live at the end of the sheet on
-       purpose: body.mobile-preview .home-feed has equal specificity and is
-       declared later, so an earlier rule here would lose on source order. */
-    body.playing { overflow: hidden; }
-    body.playing .home-feed { scroll-snap-type: none; overflow-y: hidden; touch-action: none; }
-    /* Beeplay's chrome is hidden while a game runs. The game's own topbar and
-       its four-stage journey nav are the session's controls and progress
-       indicator, so ours would only duplicate and crowd them. Hiding the
-       bottom nav also removes the stray-tap route out of a running session. */
     /* Identity picker. Reached by a plain link, so it is a full document
        rendered inside the usual shell rather than an htmx swap. */
     .claim-layout { padding: 20px 16px 40px; display: grid; gap: 20px; }
@@ -1138,10 +1129,6 @@
     .claim-bio { margin: 0; font-size: 12px; color: #6b6f6e; line-height: 1.45; }
     .claim-state { margin-top: 4px; font-size: 11px; color: #9a9d9b; }
     .claim-card.mine .claim-state { color: #171b1a; font-weight: 600; }
-
-    body.playing .topbar,
-    body.playing .bottom-nav,
-    body.playing .bottom-spacer { display: none; }
 
     /* Double's mobile layout: a fixed game viewport above one connected,
        swipeable information/action/navigation assembly. Games never receive
@@ -1184,15 +1171,18 @@
     .game-window .game-frame {
       display: block; width: 100%; height: 100%; border: 0; background: #111;
     }
-    .game-expand, .game-collapse {
+    .game-expand, .game-collapse, .game-mute {
       position: absolute; z-index: 4; display: grid; place-items: center; padding: 0;
       border: 1px solid rgba(255,255,255,.18); color: #fff; background: rgba(9,11,11,.62);
     }
-    .game-expand svg, .game-collapse svg {
+    .game-expand svg, .game-collapse svg, .game-mute svg {
       width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2;
       stroke-linecap: round; stroke-linejoin: round;
     }
     .game-expand { right: 6px; bottom: 6px; width: 34px; height: 34px; border-radius: 12px; }
+    .game-mute { right: 6px; bottom: 46px; width: 34px; height: 34px; border-radius: 12px; }
+    .game-mute .sound-off, .game-mute.muted .sound-on { display: none; }
+    .game-mute.muted .sound-off { display: inline; }
     .game-collapse {
       display: none; top: calc(4px + env(safe-area-inset-top)); left: 50%; width: 48px; height: 24px;
       border-radius: 999px; transform: translateX(-50%);
@@ -1201,6 +1191,12 @@
     .game-card.expanded .game-window { position: fixed; inset: 0; z-index: 85; }
     .game-card.expanded .game-expand { display: none; }
     .game-card.expanded .game-collapse { display: grid; }
+    /* Beside the collapse pill, clear of the game's own corner controls. */
+    .game-card.expanded .game-mute {
+      top: calc(4px + env(safe-area-inset-top)); right: auto; bottom: auto;
+      left: calc(50% + 30px); width: 24px; height: 24px; border-radius: 999px;
+    }
+    .game-card.expanded .game-mute svg { width: 13px; height: 13px; }
     body.game-expanded .bottom-nav { display: none; }
     .game-loading {
       position: absolute; inset: 0; z-index: 1; display: grid; place-content: center;
@@ -1264,8 +1260,6 @@
     body.mobile-preview.feed-mode .nav-item { height: 38px; }
     body.mobile-preview.feed-mode .floating-create { width: 44px; height: 44px; font-size: 25px; box-shadow: none; }
     body.mobile-preview .bottom-spacer { display: none; }
-    body.playing .bottom-nav { display: flex; }
-    #gameHost { display: none !important; }
 
     .comments-backdrop {
       position: fixed; inset: 0; z-index: 90; display: none; align-items: flex-end;
@@ -1340,6 +1334,7 @@
     body.mobile-preview #profileView .tab span { font-size: 16px; }
     body.mobile-preview #profileView .profile-work-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin-top: 12px; }
   </style>
+  <link rel="stylesheet" href="{{ asset('css/generation.css') }}">
 </head>
 <body class="mobile-preview{% if view == 'home' %} feed-mode{% endif %}"
       hx-target="#viewport" hx-swap="innerHTML" hx-push-url="true"
@@ -1359,7 +1354,7 @@
         <button class="nav-link{% if view == 'messages' %} active{% endif %}" data-view-target="messages" hx-get="/messages">消息</button>
         <button class="nav-link{% if view == 'profile' %} active{% endif %}" data-view-target="profile" hx-get="/profile">个人</button>
       </nav>
-      <button class="desktop-create" data-action="create" aria-label="开始创建"><span>+</span><span>开始创建</span></button>
+      <button class="desktop-create" data-action="create" aria-label="开始创建"{% if not current_user %} aria-disabled="true"{% endif %}><span>+</span><span>开始创建</span></button>
       <div class="topbar-actions">
         <button class="credit-pill" id="creditPill" aria-label="查看蜂蜜积分"><span class="credit-dot">✦</span><span>1,000</span></button>
         <button class="icon-button" id="notificationButton" data-view-target="messages" hx-get="/messages" aria-label="查看消息">
@@ -1378,10 +1373,9 @@
          a snapshot over the whole body: app.js re-executes and registers a
          second set of delegated listeners (every click then fires twice, so
          like/save toggle on then off and never stick), while the first set is
-         left pointing at a detached #gameHost, #createModal and #toast. The
-         snapshot also deserializes a stale <iframe>, so the next play mounts a
-         second copy of the game beside a zombie. Restoring only what htmx owns
-         leaves the body-level hosts — the whole point of them — untouched. -->
+         left pointing at a detached #createModal and #toast. Restoring only what
+         htmx owns leaves the body-level elements untouched; app.js sets up the
+         restored feed's game frames again. -->
     <main class="page" id="viewport" hx-history-elt>
 {% include "views/" ~ view ~ ".html" %}
     </main>
@@ -1397,7 +1391,7 @@
       <button class="nav-item{% if view == 'discover' %} active{% endif %}" data-view-target="discover" hx-get="/discover" aria-label="探索">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m15.4 8.6-2.1 4.7-4.7 2.1 2.1-4.7 4.7-2.1Z"/></svg>
       </button>
-      <button class="floating-create" data-action="create" aria-label="开始创作">+</button>
+      <button class="floating-create" data-action="create" aria-label="开始创作"{% if not current_user %} aria-disabled="true"{% endif %}>+</button>
       <button class="nav-item{% if view == 'messages' %} active{% endif %}" data-view-target="messages" hx-get="/messages" aria-label="消息"><span style="font-size: 22px;">♧</span><span class="dot" aria-hidden="true"></span></button>
       <button class="nav-item{% if view == 'profile' %} active{% endif %}" data-view-target="profile" hx-get="/profile" aria-label="个人"><span style="font-size: 22px;">●</span></button>
     </div>
@@ -1439,15 +1433,6 @@
     </div>
   </div>
 
-  <!-- Persistent game host. Body-level on purpose: anything inside #viewport is
-       destroyed by an htmx nav swap, which would kill a session mid-brew. -->
-  <div id="gameHost" hidden>
-    <!-- Pauses rather than ends: the iframe stays mounted and keeps its game
-         state, the host just hides. Ending a session outright is a separate,
-         deliberate action (switching to another game). -->
-    <button id="gameStop" aria-label="暂停并返回信息流" title="暂停并返回">×</button>
-  </div>
-
   <div class="comments-backdrop" id="commentsModal" role="dialog" aria-modal="true" aria-labelledby="commentsTitle">
     <section class="comments-panel">
       <header class="comments-head"><h2 id="commentsTitle">评论</h2><button class="comments-close" id="commentsClose" aria-label="关闭评论">×</button></header>
@@ -1464,5 +1449,6 @@
   <script src="{{ asset('js/page-reporter.js') }}"></script>
   <script src="{{ asset('vendor/htmx.min.js') }}"></script>
   <script src="{{ asset('js/app.js') }}"></script>
+  <script src="{{ asset('js/generation.js') }}"></script>
 </body>
 </html>

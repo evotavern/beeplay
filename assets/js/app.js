@@ -6,11 +6,43 @@
   var toastTimer;
   var feedWheelLocked = false;
 
-  function showToast(message) {
+  function showToast(message, link) {
     toast.textContent = message;
+    if (link) {
+      var anchor = document.createElement("a");
+      anchor.href = link.href;
+      anchor.textContent = link.text;
+      toast.appendChild(anchor);
+    }
     toast.classList.add("show");
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { toast.classList.remove("show"); }, 2200);
+    // A toast with a link stays up long enough to be tapped.
+    toastTimer = setTimeout(function () { toast.classList.remove("show"); }, link ? 4000 : 2200);
+  }
+
+  // Every way in through the create modal needs a claimed identity, so an
+  // unclaimed visitor is stopped at the button instead of after filling in
+  // (and uploading) a whole game. The claim brings them back with the modal open.
+  function promptClaim() {
+    var back = new URL(window.location.href);
+    back.searchParams.set("create", "1");
+    showToast("先选择一个身份，才能开始创作", {
+      href: "/claim?next=" + encodeURIComponent(back.pathname + back.search),
+      text: "去选择身份 →"
+    });
+  }
+
+  // Social actions need a claimed identity too. Asking instead of redirecting
+  // keeps the game running, and the claim brings the visitor back to it.
+  function promptIdentity(message) {
+    var back = window.location.pathname + window.location.search;
+    if (activeInlineCard && document.contains(activeInlineCard)) {
+      back = "/?game=" + encodeURIComponent(activeInlineCard.dataset.artifact);
+    }
+    showToast(message, {
+      href: "/claim?next=" + encodeURIComponent(back),
+      text: "去选择身份 →"
+    });
   }
 
   // The swapped-in section is the only .view in the DOM, so it *is* the state.
@@ -179,7 +211,7 @@
       body: JSON.stringify(body)
     }).then(function (response) {
       if (response.status === 401) {
-        window.location.href = "/claim";
+        promptIdentity("先选择一个身份，才能点赞和收藏");
         throw new Error("identity required");
       }
       return response.json().catch(function () { return {}; }).then(function (payload) {
@@ -293,8 +325,10 @@
       return;
     }
 
-    if (target.closest("[data-action='create']")) {
-      openCreateModal();
+    var createButton = target.closest("[data-action='create']");
+    if (createButton) {
+      if (createButton.getAttribute("aria-disabled") === "true") promptClaim();
+      else openCreateModal();
       return;
     }
 
@@ -348,8 +382,7 @@
         showToast("先写下一句想法吧");
         return;
       }
-      showToast("Bee 正在把你的想法变成一个可玩的版本…");
-      setTimeout(function () { showToast("初版完成，马上可以开始试玩"); }, 1700);
+      if (window.BeeGeneration) window.BeeGeneration.start();
       return;
     }
 
@@ -487,6 +520,15 @@
         // A refusal the app answered is already in the server's log.
         if (!answered) reportUploadFailure(error, httpStatus);
         document.getElementById("importStatus").textContent = error.message;
+        // A 401 has already sent the page to /claim, taking the form with it.
+        if (window.beeplayReport) {
+          window.beeplayReport("shown", error.message, {
+            area: "creation",
+            next: httpStatus === 401 ? "redirected" : "stayed",
+            lost: httpStatus === 401,
+            status: httpStatus || null
+          });
+        }
       })
       .finally(function () { importProgress.hidden = true; })
       .finally(function () { importSubmit.disabled = false; });
@@ -502,47 +544,13 @@
   });
 
 
-  // --- inline game host ------------------------------------------------
-  // A game is an offline H5 artifact in its own sandboxed iframe. The iframe
-  // lives in #gameHost, a body-level sibling of #viewport, for one reason:
-  // htmx replaces #viewport wholesale on every nav, which destroys any iframe
-  // inside it and the running game with it. Body level is what lets a full
-  // four-stage session survive navigation. #createModal and #toast sit at the
-  // same level for the same reason.
-  //
-  // The host is NEVER reparented. Moving an iframe node in the DOM reloads its
-  // document in every browser, which would destroy exactly the session this
-  // design exists to preserve. So the iframe is appended once and only ever
-  // shown or hidden — never moved.
-  //
-  // The host is full-bleed (position:fixed, inset:0, z-index:60), which covers
-  // beeplay's topbar and bottom nav as well as the card. That is what resolves
-  // double chrome: the game's own topbar and journey nav become the only
-  // chrome on screen, and nothing in the artifact had to change.
-  var gameHost = document.getElementById("gameHost");
-  var gameStop = document.getElementById("gameStop");
-
-  // One live session at a time: {hash, frame, card, active}. `active` false
-  // means paused — the iframe is still mounted and still holding game state,
-  // the host is just hidden and the feed unlocked.
-  var session = null;
-
-  // TODO(completion-contract): After we have ten real games, review how each
-  // one expresses completion and define a dedicated game-to-host hook from
-  // that evidence. Keep completion separate from views and health signals;
-  // do not infer it from load, pause, or exit. Then retrofit those ten games
-  // to the agreed contract.
-
-  function gamePlaying() {
-    return !!(session && session.active);
-  }
-
   // --- crash reporting -------------------------------------------------
   // Every uploaded game carries an inlined reporter (assets/js/game-reporter.js)
-  // that postMessages "loaded" and "error" here. The host adds "start" on
-  // mount and "timeout" when "loaded" never arrives, which is also what a
-  // missing or broken index.html looks like from here. All of it goes to
-  // /api/game-health, which hides games that keep crashing.
+  // that postMessages "loaded" and "error" here. The feed adds "start" when a
+  // game first becomes the active card and "timeout" when "loaded" never
+  // arrives, which is also what a missing or broken index.html looks like from
+  // here. All of it goes to /api/game-health, which hides games that keep
+  // crashing.
   var loadTimeoutMs = 1000 * (parseInt(document.body.dataset.loadTimeoutS, 10) || 10);
 
   function reportHealth(play, kind, detail) {
@@ -562,148 +570,11 @@
     } catch (ignored) {}
   }
 
-  function newHealthId() {
-    return interactionId();
-  }
-
-  function watchHealth(play) {
-    play.healthId = newHealthId();
-    play.mountedAt = Date.now();
-    play.loaded = false;
-    reportHealth(play, "start");
-    play.loadTimer = setTimeout(function () {
-      if (!play.loaded) reportHealth(play, "timeout", "no load signal after " + loadTimeoutMs + "ms");
-    }, loadTimeoutMs);
-  }
-
-  window.addEventListener("message", function (event) {
-    var play = session;
-    if (!play || !play.frame || event.source !== play.frame.contentWindow) return;
-    var data = event.data || {};
-    if (data.beeplay === "loaded" && !play.loaded) {
-      play.loaded = true;
-      clearTimeout(play.loadTimer);
-      reportHealth(play, "loaded");
-    } else if (data.beeplay === "error") {
-      reportHealth(play, "error", data.detail);
-    }
-  });
-
-  function mountGame(card, hash) {
-    var frame = document.createElement("iframe");
-    frame.src = "/games/" + hash + "/index.html";
-    // No allow-same-origin: the game runs on an opaque origin and cannot
-    // reach this document. There is deliberately no host API.
-    frame.setAttribute("sandbox", "allow-scripts");
-    frame.title = card.dataset.gameTitle || "游戏";
-    frame.className = "game-frame";
-    gameHost.appendChild(frame);
-    return frame;
-  }
-
-  function resumeGame(card, button) {
-    session.card = card;
-    session.active = true;
-    document.body.classList.add("playing");
-    gameHost.hidden = false;
-    if (button) { button.classList.add("active"); button.textContent = "Ⅱ"; }
-  }
-
-  function pauseGame() {
-    if (!session) return;
-    session.active = false;
-    document.body.classList.remove("playing");
-    gameHost.hidden = true;
-    // Hidden, not unmounted. The iframe stays in the DOM holding the game's
-    // JS state, so resuming returns the user to their half-made cup. This is
-    // the whole reason the host is body-level: a paused session has to survive
-    // an htmx nav swap, and anything inside #viewport would not.
-    var button = session.card && session.card.querySelector('[data-game-action="play"]');
-    if (button) { button.classList.remove("active"); button.textContent = "▶"; }
-  }
-
-  // Destroys the document and the session with it. Only ever deliberate.
-  function endGame() {
-    if (!session) return;
-    pauseGame();
-    // Only the frames go. #gameStop is a child of the host, so clearing the
-    // host wholesale would delete the sole exit control — body.playing hides
-    // the topbar and the bottom nav, leaving a full-bleed overlay with no way
-    // out but the Escape key, which a phone does not have.
-    [].forEach.call(gameHost.querySelectorAll("iframe"), function (frame) {
-      frame.remove();
-    });
-    clearTimeout(session.loadTimer);
-    session = null;
-  }
-
-  function togglePlay(card, button, title) {
-    // No artifact means nothing to run; keep the prototype's toast.
-    var hash = card && card.dataset.artifact;
-    if (!hash || !gameHost) {
-      button.classList.toggle("active");
-      var on = button.classList.contains("active");
-      button.textContent = on ? "Ⅱ" : "▶";
-      showToast(on ? "正在试玩 " + title : "已暂停 " + title);
-      return;
-    }
-
-    if (session && session.hash === hash) {
-      if (session.active) pauseGame(); else resumeGame(card, button);
-      return;
-    }
-
-    // Switching games throws away the cup in progress, so make it a decision.
-    if (session && !window.confirm("换一个游戏会结束当前这局，确定吗？")) return;
-    endGame();
-
-    session = { hash: hash, workId: card.dataset.gameId, frame: null, card: card, active: false };
-    session.frame = mountGame(card, hash);
-    watchHealth(session);
-    resumeGame(card, button);
-  }
-
-  // Nav guard. Hiding beeplay's chrome while body.playing removes the bottom
-  // nav from the screen, so stray taps largely disappear — but the topbar
-  // brand and nav links still carry hx-get, so leaving must stay deliberate.
-  document.addEventListener("click", function (event) {
-    if (!gamePlaying()) return;
-    var nav = event.target.closest("[hx-get], [data-view-target]");
-    if (!nav || gameHost.contains(nav)) return;
-    if (!window.confirm("离开会暂停这一局，确定吗？")) {
-      event.preventDefault();
-      event.stopPropagation();
-      return;
-    }
-    pauseGame();
-  }, true);
-
-  // The card is rebuilt on every swap, so re-find it by hash and re-anchor.
-  // A paused session survives the swap because the host is outside #viewport.
-  function reanchorSession() {
-    if (!session) return;
-    session.card = document.querySelector(
-      '.game-card[data-artifact="' + session.hash + '"]'
-    );
-  }
-
-  document.body.addEventListener("htmx:afterSwap", function (event) {
-    if (event.detail.target.id !== "viewport") return;
-    reanchorSession();
-  });
-
-  // Back and forward rebuild the card too, and a paused session has to survive
-  // them for the same reason it survives a nav swap.
-  document.body.addEventListener("htmx:historyRestore", reanchorSession);
-
-  // The exit control belongs to the host, not the card: the full-bleed
-  // overlay covers .game-actions, so the card's own Ⅱ is unreachable while
-  // playing. It pauses rather than ends — see pauseGame().
-  if (gameStop) gameStop.addEventListener("click", pauseGame);
-
-  document.addEventListener("keydown", function (event) {
-    if (event.key === "Escape" && gamePlaying()) pauseGame();
-  });
+  // TODO(completion-contract): After we have ten real games, review how each
+  // one expresses completion and define a dedicated game-to-host hook from
+  // that evidence. Keep completion separate from views and health signals;
+  // do not infer it from load, pause, or exit. Then retrofit those ten games
+  // to the agreed contract.
 
   // --- inline game feed ----------------------------------------------
   // Games are full-screen phone pages. Each frame is given the screen size
@@ -718,9 +589,32 @@
   var PHONE_MAX_WIDTH = 500;
   var PHONE_SCREEN = { width: 390, height: 844 };
 
-  function hostMessage(frame, type) {
+  // The game's inlined reporter holds its audio on "pause" and "mute": a card
+  // scrolled out of view keeps running, and the game cannot tell.
+  function tellGame(frame, command) {
     if (!frame || !frame.contentWindow) return;
-    frame.contentWindow.postMessage({ beeplayHost: type }, "*");
+    frame.contentWindow.postMessage({ beeplayHost: command }, "*");
+  }
+
+  // One mute for every game, kept across visits like a feed's sound toggle.
+  var muted = false;
+  try { muted = localStorage.getItem("beeplay.muted") === "1"; } catch (ignored) {}
+
+  function showMute() {
+    document.querySelectorAll("[data-game-mute]").forEach(function (button) {
+      button.classList.toggle("muted", muted);
+      button.setAttribute("aria-pressed", muted ? "true" : "false");
+      button.setAttribute("aria-label", muted ? "打开声音" : "静音");
+    });
+  }
+
+  function toggleMute() {
+    muted = !muted;
+    try { localStorage.setItem("beeplay.muted", muted ? "1" : "0"); } catch (ignored) {}
+    showMute();
+    document.querySelectorAll(".game-frame").forEach(function (frame) {
+      tellGame(frame, muted ? "mute" : "unmute");
+    });
   }
 
   function gameScreen() {
@@ -779,7 +673,7 @@
         frame.setAttribute("src", frame.dataset.src);
       }
       candidate.classList.toggle("active-game", active);
-      hostMessage(frame, active ? "activate" : "deactivate");
+      tellGame(frame, active ? "resume" : "pause");
       if (active) {
         var play = inlinePlays.get(frame);
         if (play && !play.started) {
@@ -850,12 +744,14 @@
           clearTimeout(play.loadTimer);
           reportHealth(play, "loaded");
         }
-        hostMessage(frame, card === activeInlineCard ? "activate" : "deactivate");
+        tellGame(frame, card === activeInlineCard ? "resume" : "pause");
+        if (muted) tellGame(frame, "mute");
       });
     });
     var feed = document.getElementById("homeFeed");
     if (feed && stageObserver) stageObserver.observe(feed);
     fitStages();
+    showMute();
     if (cards.length && !(activeInlineCard && document.contains(activeInlineCard))) {
       activateInlineGame(sharedGameCard() || cards[0]);
       alignFeed();
@@ -885,6 +781,7 @@
     if (!event.target.closest) return;
     var expand = event.target.closest("[data-game-expand]");
     if (expand) { expandGame(expand.closest(".game-card")); return; }
+    if (event.target.closest("[data-game-mute]")) { toggleMute(); return; }
     if (event.target.closest("[data-game-collapse]")) collapseGame();
   });
 
@@ -920,7 +817,7 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ active: active })
     }).then(function (response) {
-      if (response.status === 401) { window.location.href = "/claim"; throw new Error("identity required"); }
+      if (response.status === 401) { promptIdentity("先选择一个身份，才能关注作者"); throw new Error("identity required"); }
       if (!response.ok) throw new Error("关注没有保存，请重试");
       return response.json();
     }).then(function (result) {
@@ -1002,7 +899,7 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content: commentInput.value.trim() })
     }).then(function (response) {
-      if (response.status === 401) { window.location.href = "/claim"; throw new Error("identity required"); }
+      if (response.status === 401) { closeComments(); promptIdentity("先选择一个身份，才能发表评论"); throw new Error("identity required"); }
       if (!response.ok) throw new Error("评论没有保存，请重试");
       return response.json();
     }).then(function (comment) {
@@ -1025,12 +922,15 @@
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ active: active })
     }).then(function (response) {
-      if (response.status === 401) { window.location.href = "/claim"; throw new Error("identity required"); }
+      if (response.status === 401) { closeComments(); promptIdentity("先选择一个身份，才能点赞评论"); throw new Error("identity required"); }
+      if (!response.ok) throw new Error("点赞没有保存，请重试");
       return response.json();
     }).then(function (result) {
       button.classList.toggle("active", result.active);
       button.setAttribute("aria-pressed", result.active ? "true" : "false");
       button.textContent = "♥ " + result.count;
+    }).catch(function (error) {
+      if (error.message !== "identity required") showToast(error.message);
     });
   });
 
@@ -1038,6 +938,17 @@
     if (event.detail.target.id === "viewport") initInlineGames();
   });
 
+  // Back from /claim?next=…?create=1: finish what the visitor was starting.
+  function resumeCreate() {
+    var here = new URL(window.location.href);
+    if (here.searchParams.get("create") !== "1") return;
+    here.searchParams.delete("create");
+    history.replaceState(history.state, "", here.pathname + here.search + here.hash);
+    var createButton = document.querySelector("[data-action='create']");
+    if (createButton && createButton.getAttribute("aria-disabled") !== "true") openCreateModal();
+  }
+
   syncChrome();
   initInlineGames();
+  resumeCreate();
 })();

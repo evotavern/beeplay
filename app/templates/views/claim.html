@@ -33,7 +33,7 @@
               {% if item.claimed and not item.mine or not claims_enabled %}
                 <div class="claim-card taken" aria-disabled="true">{{ card_body(item) }}</div>
               {% else %}
-                <form class="claim-action" method="post" action="/claim/{{ item.user.slug }}?csrf_token={{ csrf_token }}">
+                <form class="claim-action" method="post" action="/claim/{{ item.user.slug }}?csrf_token={{ csrf_token }}&amp;next={{ next_url|urlencode }}">
                   <button class="claim-card{% if item.mine %} mine{% endif %}" type="submit">{{ card_body(item) }}</button>
                 </form>
               {% endif %}

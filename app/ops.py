@@ -9,15 +9,20 @@
     beeplay-ops health WORK_ID               # recent plays and errors
     beeplay-ops history WORK_ID              # the audit trail
     beeplay-ops ux [--every 60] [--since 2h] # what users hit since the last check
-    beeplay-ops refresh-reporter             # add the crash reporter to older games
+    beeplay-ops refresh-reporter             # bring every game's reporter up to date
     beeplay-ops migrate                      # schema + seed; release.sh runs it
+    beeplay-ops generations [--id ID]        # prompt-to-game speed and funnel
+    beeplay-ops generation-keys [--enable ID] # provider key health and usage
 
 SSH access is the only authentication. Every change is audited as ops:<user>.
 """
 
 import argparse
 import getpass
+import json
+import math
 import os
+import statistics
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -25,9 +30,12 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import config, db, health, ingest, ux
-from app.game_imports import REPORTER_MARKER, REPORTER_VERSION, GameImportError, read_zip
-from app.models import STATUSES, FailedUpload, User, Work, WorkEvent, utcnow
+from app import config, db, generation, health, ingest, ux
+from app.game_imports import GameImportError, read_zip, reporter_is_current
+from app.models import (
+    STATUSES, FailedUpload, Generation, GenerationAttempt, GenerationEvent, GenerationKey,
+    User, Work, WorkEvent, utcnow,
+)
 
 
 def _actor() -> str:
@@ -159,12 +167,11 @@ def cmd_refresh_reporter(session: Session, args) -> None:
         if not index.is_file():
             print(f"work {work.id}: {index} missing, skipped")
             continue
-        if REPORTER_VERSION in index.read_bytes():
+        if reporter_is_current(index.read_bytes()):
             continue
-        ingest.replace(
-            session, work, entries=_entries(directory), actor=_actor(), reactivate=False
-        )
-        print(f"work {work.id}: reporter added, now {work.artifact_hash}")
+        # A hidden game stays hidden: a new reporter does not fix its crash.
+        ingest.replace(session, work, entries=_entries(directory), actor=_actor(), revive=False)
+        print(f"work {work.id}: reporter updated, now {work.artifact_hash}")
 
 
 def _duration(text: str) -> str:
@@ -213,10 +220,65 @@ def cmd_migrate(session: Session, args) -> None:
     print("database is at the latest schema")
 
 
+def cmd_generations(session, args):
+    if args.id:
+        job = session.get(Generation, args.id)
+        if job is None:
+            raise SystemExit("generation not found")
+        print(json.dumps({"id": job.id, "status": job.status, "model": job.model,
+                          "error": job.error, "timings": json.loads(job.timings)}, ensure_ascii=False))
+        for row in session.scalars(select(GenerationEvent).where(GenerationEvent.generation_id == job.id).order_by(GenerationEvent.id)):
+            print(f"{row.at.isoformat()} {row.kind} elapsed_ms={row.elapsed_ms}")
+        for row in session.scalars(select(GenerationAttempt).where(GenerationAttempt.generation_id == job.id)):
+            print(f"key={row.key_id} status={row.http_status} reason={row.reason or '-'} latency_ms={row.latency_ms} usage={row.usage} limits={row.limits}")
+        return
+    jobs = list(session.scalars(select(Generation).order_by(Generation.created_at.desc()).limit(args.limit)))
+    for job in jobs:
+        print(f"{job.id} {job.status:<10} {job.model} {job.timings} error={job.error or '-'}")
+    for model in sorted({job.model for job in jobs}):
+        group = [job for job in jobs if job.model == model]
+        timings = [json.loads(job.timings) for job in group]
+        print(f"model={model} samples={len(group)} ready_or_published={sum(job.status in generation.PLAYABLE for job in group)} failed={sum(job.status == generation.FAILED for job in group)}")
+        for metric in ("queue_ms", "provider_ms", "validation_ms", "playable_ms", "details_ms", "idle_wait_ms", "to_playtest_ms"):
+            values = sorted(t[metric] for t in timings if metric in t)
+            if values:
+                print(f"  {metric}: n={len(values)} p50={statistics.median(values):.0f} p95={values[max(0, math.ceil(len(values)*.95)-1)]}")
+
+
+def cmd_generation_keys(session, args):
+    configured = {generation.fingerprint(key) for key in config.EVOMAP_KEYS}
+    if args.enable:
+        row = session.get(GenerationKey, args.enable)
+        if row is None:
+            raise SystemExit("key identifier not found")
+        row.disabled, row.cooldown_until = False, None
+        session.commit()
+    for key_id in sorted(configured):
+        row = session.get(GenerationKey, key_id)
+        attempts = list(session.scalars(select(GenerationAttempt).where(GenerationAttempt.key_id == key_id).order_by(GenerationAttempt.id)))
+        tokens = [json.loads(a.usage).get("total_tokens") for a in attempts]
+        print(json.dumps({"key_id": key_id, "disabled": row.disabled if row else False,
+            "cooldown_until": str(row.cooldown_until) if row and row.cooldown_until else None,
+            "requests": len(attempts), "failed": sum(a.status != "ok" for a in attempts),
+            "last_rejection": next((a.reason for a in reversed(attempts) if a.reason), None),
+            "observed_total_tokens": sum(t for t in tokens if t is not None),
+            "requests_without_token_usage": sum(t is None for t in tokens),
+            "remaining_balance": "unknown",
+            "last_reported_limits": json.loads(attempts[-1].limits) if attempts else {}}, ensure_ascii=False))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="beeplay-ops", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
+
+    generations = commands.add_parser("generations", help="generation speed and playtest funnel")
+    generations.add_argument("--id", help="inspect one generation and its events")
+    generations.add_argument("--limit", type=int, default=100)
+    generations.set_defaults(run=cmd_generations)
+    keys = commands.add_parser("generation-keys", help="observed usage and provider key health")
+    keys.add_argument("--enable", help="re-enable a key by its non-secret identifier")
+    keys.set_defaults(run=cmd_generation_keys)
 
     listing = commands.add_parser("list")
     listing.add_argument("--status", choices=STATUSES)

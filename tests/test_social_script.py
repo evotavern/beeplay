@@ -6,12 +6,12 @@ SCRIPT = (Path(__file__).parents[1] / "assets" / "js" / "app.js").read_text()
 
 
 class SocialScriptTests(unittest.TestCase):
-    def test_a_new_mount_records_one_view_and_resume_does_not(self) -> None:
+    def test_a_card_records_one_view_the_first_time_it_is_active(self) -> None:
         self.assertEqual(SCRIPT.count('socialFetch(play.workId, "view"'), 1)
-        self.assertLess(
-            SCRIPT.index("if (session && session.hash === hash)"),
-            SCRIPT.index("watchHealth(session)"),
-        )
+        guard = SCRIPT.index("if (play && !play.started) {")
+        view = SCRIPT.index('socialFetch(play.workId, "view"')
+        self.assertLess(guard, view)
+        self.assertLess(SCRIPT.index("play.started = true;", guard), view)
 
     def test_share_is_recorded_only_after_a_real_share_or_copy(self) -> None:
         native = SCRIPT.index("await navigator.share")

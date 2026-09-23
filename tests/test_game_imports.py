@@ -6,13 +6,13 @@ from pathlib import Path
 
 from app.game_imports import (
     REPORTER_MARKER,
-    REPORTER_VERSION,
     GameImportError,
     inject_reporter,
     install_folder,
     install_zip,
     pack_zip,
     read_zip,
+    reporter_is_current,
 )
 
 
@@ -25,14 +25,6 @@ def make_zip(files: dict[str, str]) -> bytes:
 
 
 class GameImportTests(unittest.TestCase):
-    def test_upgrades_the_legacy_reporter_in_place(self) -> None:
-        legacy = REPORTER_MARKER + b"<script>oldReporter()</script><main>game</main>"
-        upgraded = inject_reporter(legacy)
-        self.assertIn(REPORTER_VERSION, upgraded)
-        self.assertNotIn(b"oldReporter", upgraded)
-        self.assertEqual(upgraded.count(REPORTER_MARKER), 1)
-        self.assertIn(b"<main>game</main>", upgraded)
-
     def test_installs_a_dist_folder_without_changing_its_contents(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             artifact = install_folder(
@@ -64,3 +56,13 @@ class GameImportTests(unittest.TestCase):
                 install_folder(
                     [("index.html", b"ok"), ("../outside.txt", b"no")], Path(directory)
                 )
+
+    def test_swaps_an_older_reporter_for_the_current_one(self) -> None:
+        old = b"<html><head>" + REPORTER_MARKER + b"<script>oldReporter()</script><title>t</title></head></html>"
+        new = inject_reporter(old)
+        self.assertTrue(reporter_is_current(new))
+        self.assertNotIn(b"oldReporter", new)
+        self.assertEqual(new.count(REPORTER_MARKER), 1)
+        self.assertIn(b"<title>t</title>", new)
+        self.assertEqual(inject_reporter(new), new)
+

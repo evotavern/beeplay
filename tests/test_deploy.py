@@ -19,6 +19,9 @@ class CaddyConfigTests(unittest.TestCase):
         self.assertIn("handle_path /games/*", self.config)
         self.assertIn("root * /var/lib/beeplay/games", self.config)
         self.assertIn('Cache-Control "public, max-age=31536000, immutable"', self.config)
+        self.assertIn('header Content-Security-Policy "sandbox allow-scripts"', self.config)
+        # Sandboxed games fetch their own files from Origin: null.
+        self.assertIn('header Access-Control-Allow-Origin "*"', self.config)
         self.assertIn("reverse_proxy 127.0.0.1:8000", self.config)
 
     def test_redirects_preserve_the_requested_uri(self) -> None:

@@ -1,42 +1,43 @@
-      <section class="view active" id="createView" data-view="create">
-        <div class="create-layout">
-          <div class="create-panel">
-            <div class="eyebrow"><i></i> Create a little magic</div>
-            <h1>说出一个想法，蜂玩帮你把它做出来。</h1>
-            <p>可以是一个小工具、一个互动游戏、一套习惯计划，或者只是一个你想每天看见的画面。先写下来，剩下的交给 Bee。</p>
-            <div class="idea-box">
-              <textarea id="ideaInput" placeholder="输入你的想法，开始建立……"></textarea>
-              <div class="idea-bottom">
-                <div class="idea-tools">
-                  <button class="tool-button" data-tool="inspiration" data-toast="已填入一个灵感提示" aria-label="灵感提示">✦</button>
-                  <button class="tool-button" data-tool="voice" data-toast="语音输入已开启" aria-label="语音输入">⌕</button>
-                  <button class="tool-button" data-tool="image" data-toast="图片素材入口已打开" aria-label="添加图片">▧</button>
-                </div>
-                <button class="idea-submit" id="ideaSubmit" aria-label="开始生成">→</button>
-              </div>
-            </div>
-            <div class="tool-strip">
-              <button class="tool-chip" data-tool="image" data-toast="图片素材入口已打开">▧ 图片</button>
-              <button class="tool-chip" data-tool="sound" data-toast="音效素材入口已打开">♫ 音效</button>
-              <button class="tool-chip" data-tool="skills" data-toast="Skills 面板已打开">✚ Skills</button>
-              <button class="tool-chip" data-tool="memes" data-toast="Memes 素材入口已打开">☻ Memes</button>
-            </div>
-            <div class="section-heading" style="margin-top: 30px;"><div><h2>需要灵感？</h2><p>从一个小而具体的愿望开始。</p></div><button data-toast="已换一条灵感">换一条 ↗</button></div>
-            <div class="inspiration-list" style="margin-top: 13px;">
-              <div class="inspiration-card"><div class="inspiration-art">☀</div><div class="inspiration-copy"><strong>每天 10 分钟的专注小岛</strong><span>习惯 · 轻量计划</span></div><button class="remix-button" data-fill="帮我做一个每天10分钟的专注小岛">使用</button></div>
-              <div class="inspiration-card"><div class="inspiration-art" style="background: var(--lavender);">✿</div><div class="inspiration-copy"><strong>给朋友的随机鼓励生成器</strong><span>互动 · 分享卡片</span></div><button class="remix-button" data-fill="帮我做一个给朋友生成随机鼓励的互动卡片">使用</button></div>
-            </div>
-          </div>
-          <aside class="credit-card">
-            <span class="eyebrow" style="color: rgba(255,255,255,0.62);"><i></i> Your Bee studio</span>
-            <strong>今天的灵感额度<br />还有很多。</strong>
-            <p>每一次生成都会留下一个可以继续玩的版本。先做出来，再慢慢变好。</p>
-            <button class="primary-button" data-toast="灵感额度充足">查看额度 <span>→</span></button>
-            <div class="steps">
-              <div class="step"><span class="step-index">1</span><div><strong>写下一个想法</strong><span>越具体，越容易得到好玩的结果。</span></div></div>
-              <div class="step"><span class="step-index">2</span><div><strong>选择一个素材</strong><span>图片、声音和 Skills 都可以加入。</span></div></div>
-              <div class="step"><span class="step-index">3</span><div><strong>试玩并发布</strong><span>把它交给朋友，一起继续玩。</span></div></div>
-            </div>
-          </aside>
-        </div>
-      </section>
+<section class="view active" id="createView" data-view="create" data-creator="{{ current_user.slug if current_user else '' }}">
+  <div class="create-layout">
+    <div class="create-panel">
+      <div class="eyebrow"><i></i> Your next little game</div>
+      <h1>一个想法，<br>马上开玩。</h1>
+      <p>描述一个你想玩的小游戏。Bee 创作时，你来给它起名字；试玩满意后，再分享给大家。</p>
+      <div class="idea-box">
+        <label class="sr-only" for="ideaInput">游戏想法</label>
+        <textarea id="ideaInput" maxlength="4000" placeholder="例如：一只小蜜蜂躲开雨滴，收集花蜜。点击屏幕飞高一点……"></textarea>
+        <div class="idea-bottom"><span class="generation-hint">一个玩法，一次创作。</span><button class="idea-submit" id="ideaSubmit" aria-label="开始生成">→</button></div>
+      </div>
+      <div class="generation-feedback">
+      <div id="generationStatus" class="generation-status" role="status" aria-live="polite">正在连接创作室…</div>
+      <div id="generationProgress" hidden><progress aria-label="正在生成游戏"></progress><span id="generationElapsed"></span></div>
+      </div>
+      <form id="generationDetails" class="generation-details" hidden>
+        <div class="section-heading"><div><h2>给你的游戏一点个性</h2><p>趁 Bee 忙着创作，把这些填好。</p></div></div>
+        <label>游戏名称<input name="title" maxlength="120" placeholder="例如：雨天采蜜" required></label>
+        <div class="generation-fields"><label>分类<input name="category" maxlength="24" placeholder="例如：放松、闯关、脑洞" required></label><label>图标<input name="emoji" maxlength="8" value="🎮" required></label></div>
+        <fieldset class="import-art"><legend>封面颜色</legend>
+          {% for art in ['art-one','art-two','art-three','art-four'] %}<label><input type="radio" name="art" value="{{ art }}" {% if loop.first %}checked{% endif %}><span class="work-art {{ art }}" aria-label="封面颜色 {{ loop.index }}"></span></label>{% endfor %}
+        </fieldset>
+        <label>一句话介绍 <small>可选</small><input name="description" maxlength="200" placeholder="告诉大家这个游戏好玩在哪"></label>
+        <p id="generationSave" class="generation-hint" role="status"></p>
+        <div class="generation-actions"><button type="button" class="primary-button" id="generationPlay" disabled>试玩游戏 →</button><button type="button" class="outline-button" id="generationRetry" hidden>重新生成</button><button type="button" class="outline-button" id="generationNew" hidden>创作下一个</button></div>
+      </form>
+      <div id="generationInspiration" class="inspiration-list">
+        <div class="inspiration-card"><div class="inspiration-art">🐝</div><div class="inspiration-copy"><strong>雨天采蜜大冒险</strong><span>点击飞行 · 躲避雨滴</span></div><button class="remix-button" data-fill="做一个点击屏幕让蜜蜂飞高、躲开雨滴并收集花蜜的小游戏">使用</button></div>
+        <div class="inspiration-card"><div class="inspiration-art">🌙</div><div class="inspiration-copy"><strong>把星星送回家</strong><span>拖动星星 · 配对解谜</span></div><button class="remix-button" data-fill="做一个拖动不同颜色的星星到对应星座的配对小游戏，有倒计时和重新开始按钮">使用</button></div>
+      </div>
+    </div>
+    <aside class="credit-card">
+      <span class="eyebrow" style="color:rgba(255,255,255,.65)"><i></i> A little game, all yours</span>
+      <strong>让等待，<br>也成为创作。</strong>
+      <p>你填写游戏信息，Bee 同时把玩法做出来。进度会留在这里，刷新页面也能回来继续。</p>
+      <div class="steps">
+        <div class="step"><span class="step-index">1</span><div><strong>描述玩法</strong><span>写清操作、目标和一点小惊喜。</span></div></div>
+        <div class="step"><span class="step-index">2</span><div><strong>完善游戏信息</strong><span>起名字、选图标，等待游戏准备好。</span></div></div>
+        <div class="step"><span class="step-index">3</span><div><strong>亲自试玩，再发布</strong><span>满意后，让它出现在首页游戏流。</span></div></div>
+      </div>
+    </aside>
+  </div>
+</section>

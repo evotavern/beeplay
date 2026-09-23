@@ -4,6 +4,7 @@ Deployed, these come from /etc/beeplay/beeplay.env; locally everything falls
 back to paths next to the code.
 """
 
+import json
 import os
 from pathlib import Path
 
@@ -35,3 +36,14 @@ ERROR_WINDOW_S = int(os.environ.get("BEEPLAY_ERROR_WINDOW_S", 30))
 CRASH_MIN_FAILURES = int(os.environ.get("BEEPLAY_CRASH_MIN_FAILURES", 3))
 CRASH_WINDOW_MIN = int(os.environ.get("BEEPLAY_CRASH_WINDOW_MIN", 30))
 CRASH_RATIO = float(os.environ.get("BEEPLAY_CRASH_RATIO", 0.5))
+
+# One-shot generation. Keys are complete bearer values, supplied only by env.
+EVOMAP_BASE_URL = os.environ.get("BEEPLAY_EVOMAP_BASE_URL", "https://api.evomap.ai/v1").rstrip("/")
+EVOMAP_MODEL = os.environ.get("BEEPLAY_EVOMAP_MODEL", "evomap-gpt-5.6-sol")
+_evomap_keys = json.loads(os.environ.get("BEEPLAY_EVOMAP_KEYS", "[]"))
+if not isinstance(_evomap_keys, list) or not all(isinstance(key, str) and key.strip() for key in _evomap_keys):
+    raise ValueError("BEEPLAY_EVOMAP_KEYS must be a JSON array of nonempty strings")
+EVOMAP_KEYS = tuple(dict.fromkeys(key.strip() for key in _evomap_keys))
+GENERATION_MAX_TOKENS = int(os.environ.get("BEEPLAY_GENERATION_MAX_TOKENS", "8192"))
+GENERATION_TIMEOUT_S = int(os.environ.get("BEEPLAY_GENERATION_TIMEOUT_S", "180"))
+GENERATION_WORKERS = max(1, min(8, int(os.environ.get("BEEPLAY_GENERATION_WORKERS", "2"))))

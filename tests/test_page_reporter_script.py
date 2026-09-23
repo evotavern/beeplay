@@ -30,6 +30,18 @@ class PageReporterTests(unittest.TestCase):
         self.assertIn('if (!answered) reportUploadFailure(error, httpStatus);', SCRIPT)
         self.assertIn('window.beeplayReport("upload"', SCRIPT)
 
+    def test_every_upload_failure_reports_what_the_player_was_shown(self) -> None:
+        shown = SCRIPT.index('window.beeplayReport("shown", error.message')
+        self.assertLess(SCRIPT.index('textContent = error.message;'), shown)
+        self.assertIn('next: httpStatus === 401 ? "redirected" : "stayed"', SCRIPT)
+        self.assertIn("lost: httpStatus === 401", SCRIPT)
+
+    def test_generation_errors_report_the_message_they_put_on_screen(self) -> None:
+        generation = (ROOT / "assets" / "js" / "generation.js").read_text()
+        self.assertIn('window.beeplayReport("shown", text, { area: "creation"', generation)
+        self.assertIn("if (error) reportShown(text);", generation)
+        self.assertEqual(generation.count("previewProblem("), 5)
+
 
 if __name__ == "__main__":
     unittest.main()

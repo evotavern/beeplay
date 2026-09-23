@@ -39,9 +39,10 @@ This copies the tree to `/root/beeplay-release/` and runs
 - keeps the previous code at `/srv/beeplay.prev`
 - syncs code, installs dependencies, the systemd unit, the BeePlay Caddy site and
   `/usr/local/bin/beeplay-ops`
-- stops the app, migrates the schema (`beeplay-ops migrate`), adds the crash
-  reporter to games installed before it existed (`beeplay-ops
-  refresh-reporter`), starts the app
+- stops the app, migrates the schema (`beeplay-ops migrate`), gives every
+  game the current reporter and sandbox shim (`beeplay-ops refresh-reporter`;
+  a changed `assets/js/game-reporter.js` republishes each game under a new
+  artifact, hidden games stay hidden), starts the app
 - waits for HTTP 200 and prints rollback commands if it never comes
 
 Schema changes are Alembic migrations in `migrations/versions/`. The app also
@@ -72,6 +73,7 @@ Everything lives in `/var/lib/beeplay`:
 | `failed/<id>.zip` | uploads that failed validation, waiting for an operator |
 | `logs/events.jsonl` | one JSON line per event; the journal has the same lines |
 | `logs/ux-last-run` | when `beeplay-ops ux` last ran |
+| `logs/person-key` | secret behind the anonymous person ids in the log; keep it private |
 
 ## Operating the event
 
@@ -93,7 +95,7 @@ loaded after 10 s, or throws in its first 30 s. The thresholds are in
 `/etc/beeplay/beeplay.env`. Crash reports are unauthenticated: if fake reports
 hide a good game, `beeplay-ops status <id> live`.
 
-What players ran into since the last check, by area and browser:
+What players ran into since the last check, by area and then by person:
 
 ```bash
 beeplay-ops ux                    # since the last check, then records this one
@@ -101,12 +103,27 @@ beeplay-ops ux --every 60         # only if the last check is over an hour old
 beeplay-ops ux --since 2h --no-mark
 ```
 
-It reads `http_error` (every 4xx/5xx the app answered, with the browser),
-`client_error` (what the page's own reporter, `assets/js/page-reporter.js`,
-caught: script errors and uploads that never reached the app, e.g. a 413 from
-the edge proxy) and the crash events above. Creation and gameplay are listed in full,
-everything else is only counted; "in-app only" means every report came from
-WeChat, QQ, Douyin or another in-app browser.
+It reads `http_error` (every 4xx/5xx the app answered), `client_error` (what
+the page's own reporter, `assets/js/page-reporter.js`, caught: script errors,
+uploads that never reached the app, e.g. a 413 from the edge proxy, and
+`shown` reports of the message a failure put on screen) and the crash events
+above. Every area (creation, gameplay, other) is listed in full, one entry per
+person, with:
+
+- an outcome: `STUCK` (failed more than once, no success since), `NO SUCCESS
+  SINCE`, or `RECOVERED` (a `creation_ok` or `play_ok` after the last failure);
+  stuck players come first;
+- `saw:` what the page showed and whether the player was sent away or lost
+  their input, or `saw (inferred):` where the page does not report it yet;
+- the claimed identity when there was one; "in-app only" means every report
+  came from WeChat, QQ, Douyin or another in-app browser.
+
+A person is `p-` plus a hash of IP and User-Agent keyed with
+`/var/lib/beeplay/logs/person-key` and the UTC date: the same player all day,
+unlinkable across days, and the IP itself is never logged. Events from before
+person ids existed are grouped by browser string, marked as such, and have no
+outcome. 404/405s from requests without a BeePlay cookie are scanners: only
+their number is shown ("noise hidden").
 
 Tracing one game or one uploader:
 

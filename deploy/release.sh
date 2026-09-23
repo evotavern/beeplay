@@ -39,7 +39,7 @@ echo "== code =="
 rm -rf "$PREV"
 cp -a "$APP" "$PREV"
 rsync -a --delete \
-  --exclude '.git' --exclude '.venv' --exclude '.cache' --exclude '.local' \
+  --exclude '.git' --exclude '.venv' --exclude '.cache' --exclude '.local' --exclude '.env' \
   --exclude 'beeplay.db*' --exclude 'games' --exclude 'failed' --exclude 'logs' \
   "$SRC/" "$APP/"
 chown -R beeplay:beeplay "$APP"

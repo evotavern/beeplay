@@ -62,6 +62,7 @@ def publish(
     entries: list[tuple[str, bytes]],
     actor: str,
     status: str = "live",
+    commit: bool = True,
 ) -> Work:
     """Install a bundle and put it in the feed. Raises GameImportError if broken."""
     artifact = install_folder(entries, config.GAMES_DIR)
@@ -83,9 +84,16 @@ def publish(
         session, work, actor=actor, kind="created",
         after={"status": status, "artifact": artifact, "title": details.title},
     )
-    session.commit()
-    events.alert(f"🆕 新游戏：{work.title}（{owner.slug}，{status}）\n{_game_url(work)}")
+    if commit:
+        session.commit()
+        announce(work, owner)
     return work
+
+
+def announce(work: Work, owner: User) -> None:
+    """Alert the team about a new game. With publish(commit=False), call this
+    after committing, so nothing is announced that could still roll back."""
+    events.alert(f"🆕 新游戏：{work.title}（{owner.slug}，{work.status}）\n{_game_url(work)}")
 
 
 def set_status(session: Session, work: Work, status: str, *, actor: str) -> None:
@@ -104,13 +112,14 @@ def set_status(session: Session, work: Work, status: str, *, actor: str) -> None
 
 def replace(
     session: Session, work: Work, *, entries: list[tuple[str, bytes]], actor: str,
-    reactivate: bool = True,
+    revive: bool = True,
 ) -> None:
     """Serve a new version. The old directory stays on disk, unreferenced.
 
     A new directory rather than an overwrite, because Caddy tells browsers to
     cache /games/ as immutable for a year. A hidden game comes back live:
-    replacing it is how staff deliver a fix.
+    replacing it is how staff deliver a fix. `revive=False` is for platform
+    refreshes that do not fix the game itself.
     """
     artifact = install_folder(entries, config.GAMES_DIR)
     before = work.artifact_hash
@@ -120,7 +129,7 @@ def replace(
         before={"artifact": before}, after={"artifact": artifact},
     )
     session.commit()
-    if reactivate and work.status == "hidden":
+    if revive and work.status == "hidden":
         set_status(session, work, "live", actor=actor)
 
 

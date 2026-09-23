@@ -62,6 +62,7 @@ def report(
     elapsed_ms: int | None = None,
     detail: str | None = None,
     user_agent: str | None = None,
+    person: dict | None = None,
 ) -> None:
     if kind not in KINDS:
         raise ValueError(f"kind must be one of {', '.join(KINDS)}")
@@ -82,6 +83,10 @@ def report(
     session.add(event)
     session.commit()
 
+    if kind == "loaded":
+        events.log_event(
+            "play_ok", work_id=work.id, **browsers.fields(user_agent), **(person or {})
+        )
     if kind not in ("error", "timeout"):
         return
     counted = _counts_as_failure(event)
@@ -89,7 +94,7 @@ def report(
         "health_fail" if counted else "health_error_late",
         work_id=work.id, artifact=artifact_hash, session=session_id,
         kind=kind, elapsed_ms=elapsed_ms, detail=event.detail,
-        **browsers.fields(user_agent),
+        **browsers.fields(user_agent), **(person or {}),
     )
     if counted and work.status == "live":
         _hide_if_crashing(session, work)

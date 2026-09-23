@@ -18,15 +18,11 @@ MAX_UNPACKED_BYTES = 100 * 1024 * 1024
 
 
 REPORTER_MARKER = b"<!--beeplay-reporter-->"
-REPORTER_VERSION = b"<!--beeplay-reporter-v5-->"
-REPORTER_END = b"<!--/beeplay-reporter-->"
 _REPORTER = (
     REPORTER_MARKER
-    + REPORTER_VERSION
     + b"<script>"
     + (BASE_DIR / "assets" / "js" / "game-reporter.js").read_bytes()
     + b"</script>"
-    + REPORTER_END
 )
 
 
@@ -34,25 +30,24 @@ class GameImportError(ValueError):
     pass
 
 
+def reporter_is_current(html: bytes) -> bool:
+    return _REPORTER in html
+
+
 def inject_reporter(html: bytes) -> bytes:
-    """Put the crash reporter first in the document, ahead of the game's scripts.
+    """Put the reporter first in the document, ahead of the game's scripts.
 
     Works on bytes so a game in any encoding survives untouched. Idempotent,
-    because an operator may re-import a bundle copied from the games store.
+    because an operator may re-import a bundle copied from the games store,
+    and an older reporter is swapped for the current one, which is how
+    `beeplay-ops refresh-reporter` brings installed games up to date.
     """
-    if REPORTER_VERSION in html:
+    if reporter_is_current(html):
         return html
-    if REPORTER_MARKER in html:
-        # Reporter v1 had no closing marker, but its injected script was the
-        # first script after the marker and never contained a literal closing
-        # script tag. Replace it in place so existing games can be upgraded.
-        return re.sub(
-            re.escape(REPORTER_MARKER) + rb".*?</script>",
-            lambda _: _REPORTER,
-            html,
-            count=1,
-            flags=re.DOTALL,
-        )
+    start = html.find(REPORTER_MARKER)
+    end = html.find(b"</script>", start) if start >= 0 else -1
+    if end >= 0:
+        return html[:start] + _REPORTER + html[end + len(b"</script>") :]
     for tag in (rb"<head(?:\s[^>]*)?>", rb"<html(?:\s[^>]*)?>"):
         match = re.search(tag, html, re.IGNORECASE)
         if match:

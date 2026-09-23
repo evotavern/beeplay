@@ -1,14 +1,14 @@
 """Persist the small social layer used by the eight demo identities.
 
-Revision ID: 0006
-Revises: 0005
+Revision ID: 0008
+Revises: 0007
 Create Date: 2026-09-23
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0006"
-down_revision = "0005"
+revision = "0008"
+down_revision = "0007"
 branch_labels = None
 depends_on = None
 
