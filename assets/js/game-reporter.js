@@ -11,42 +11,20 @@
       );
     } catch (ignored) {}
   }
-  function sendLayout() {
-    try {
-      var root = document.documentElement;
-      var body = document.body;
-      var width = Math.max(root.scrollWidth, body ? body.scrollWidth : 0);
-      var height = Math.max(root.scrollHeight, body ? body.scrollHeight : 0);
-      window.parent.postMessage({ beeplay: "layout", width: width, height: height }, "*");
-    } catch (ignored) {}
-  }
-  var compatibilityStyle = null;
-  function styleFor(mode) {
-    if (!compatibilityStyle) {
-      compatibilityStyle = document.createElement("style");
-      compatibilityStyle.id = "beeplay-viewport-mode";
-      (document.head || document.documentElement).appendChild(compatibilityStyle);
+  // Web Audio has no DOM element to pause, so remember every context the
+  // game creates. This script runs before any game script.
+  var audioContexts = [];
+  ["AudioContext", "webkitAudioContext"].forEach(function (name) {
+    var Native = window[name];
+    if (typeof Native !== "function") return;
+    function Tracked() {
+      var context = new (Function.prototype.bind.apply(Native, [null].concat([].slice.call(arguments))))();
+      audioContexts.push(context);
+      return context;
     }
-    compatibilityStyle.textContent = mode === "scroll"
-      ? "html{overflow-y:auto!important;scrollbar-width:none!important;overscroll-behavior:contain!important}" +
-        "html::-webkit-scrollbar,body::-webkit-scrollbar{display:none!important;width:0!important}"
-      : "html{overflow:hidden!important}";
-  }
-  function applyViewportMode(mode) {
-    mode = mode === "compress" || mode === "scroll" ? mode : "fixed";
-    if (!document.body) return;
-    document.body.style.transform = "";
-    document.body.style.transformOrigin = "";
-    styleFor(mode);
-    if (mode !== "compress") return;
-    requestAnimationFrame(function () {
-      var root = document.documentElement;
-      var body = document.body;
-      var height = Math.max(root.scrollHeight, body.scrollHeight, 640);
-      body.style.transformOrigin = "top center";
-      body.style.transform = "scaleY(" + Math.min(1, 640 / height).toFixed(5) + ")";
-    });
-  }
+    Tracked.prototype = Native.prototype;
+    try { window[name] = Tracked; } catch (ignored) {}
+  });
   // Capture phase also sees resource failures, which do not bubble. Only a
   // script that fails to load counts; a missing image is not a crash.
   window.addEventListener("error", function (event) {
@@ -60,31 +38,35 @@
     var reason = event.reason;
     send("error", "unhandled rejection: " + (reason && reason.message ? reason.message : reason));
   });
-  // Host lifecycle contract. Generated games can listen for the same
-  // beeplayHost messages for richer pause/resume behavior; this fallback
-  // handles ordinary media in imported games.
+  // Host lifecycle contract: the feed deactivates a game when it scrolls
+  // away and activates it when it comes back. Only what was paused here is
+  // resumed, so a game's own sound effects never start on activation.
+  // Generated games can listen for beeplay:lifecycle for richer behavior.
   window.addEventListener("message", function (event) {
     var data = event.data || {};
-    if (!data.beeplayHost) return;
+    if (data.beeplayHost !== "activate" && data.beeplayHost !== "deactivate") return;
+    var active = data.beeplayHost === "activate";
     try {
       document.querySelectorAll("audio, video").forEach(function (media) {
-        if (data.beeplayHost === "deactivate") {
-          media.dataset.beeplayWasPlaying = media.paused ? "0" : "1";
+        if (!active && !media.paused) {
+          media.dataset.beeplayPaused = "1";
           media.pause();
-        } else if (data.beeplayHost === "activate") {
-          media.muted = !!data.muted;
-          if (media.dataset.beeplayWasPlaying !== "0") media.play().catch(function () {});
+        } else if (active && media.dataset.beeplayPaused === "1") {
+          delete media.dataset.beeplayPaused;
+          media.play().catch(function () {});
+        }
+      });
+      audioContexts.forEach(function (context) {
+        if (!active && context.state === "running") {
+          context.beeplayPaused = true;
+          context.suspend().catch(function () {});
+        } else if (active && context.beeplayPaused) {
+          context.beeplayPaused = false;
+          context.resume().catch(function () {});
         }
       });
       window.dispatchEvent(new CustomEvent("beeplay:lifecycle", { detail: data }));
-      if (data.beeplayHost === "activate") {
-        applyViewportMode(data.viewport_mode);
-        requestAnimationFrame(function () { requestAnimationFrame(sendLayout); });
-      }
     } catch (ignored) {}
   });
-  window.addEventListener("load", function () {
-    send("loaded");
-    requestAnimationFrame(function () { requestAnimationFrame(sendLayout); });
-  });
+  window.addEventListener("load", function () { send("loaded"); });
 })();

@@ -32,7 +32,6 @@
     if (event.detail.target.id !== "viewport") return;
     syncChrome();
     window.scrollTo({ top: 0, behavior: "smooth" });
-    setTimeout(scrollToSharedGame, 0);
   });
 
   // A history restore swaps #viewport without firing htmx:afterSwap, and the
@@ -40,7 +39,10 @@
   // stale nav highlight, and a missing body.feed-mode that unlocks page scroll
   // underneath the feed. htmx restores the scroll position itself, so only the
   // chrome needs resyncing here.
-  document.body.addEventListener("htmx:historyRestore", syncChrome);
+  document.body.addEventListener("htmx:historyRestore", function () {
+    syncChrome();
+    initInlineGames();
+  });
 
   function openCreateModal() {
     showCreateChoices();
@@ -158,15 +160,11 @@
     activateInlineGame(cards[nextIndex]);
   }
 
-  function scrollToSharedGame() {
-    if (currentView() !== "home") return;
+  function sharedGameCard() {
+    if (currentView() !== "home") return null;
     var artifact = new URLSearchParams(window.location.search).get("game");
-    if (!artifact) return;
-    var card = document.querySelector('.game-card[data-artifact="' + CSS.escape(artifact) + '"]');
-    if (card) {
-      document.getElementById("homeFeed").scrollTo({ top: card.offsetTop });
-      activateInlineGame(card);
-    }
+    if (!artifact) return null;
+    return document.querySelector('.game-card[data-artifact="' + CSS.escape(artifact) + '"]');
   }
 
   function interactionId() {
@@ -707,21 +705,71 @@
     if (event.key === "Escape" && gamePlaying()) pauseGame();
   });
 
-  // --- fixed inline game feed -----------------------------------------
-  // Games own every gesture inside their iframe. Only the connected lower
-  // tray changes cards, so a game can use vertical swipes without fighting
-  // the feed.
+  // --- inline game feed ----------------------------------------------
+  // Games are full-screen phone pages. Each frame is given the screen size
+  // the game would get opened on its own, then scaled evenly into the game
+  // window, so every game lays out exactly as it does standalone. Expanding
+  // plays it at full size; the frame is only rescaled, never reloaded.
+  // Games own every gesture inside their frame; only the tray switches cards.
   var inlinePlays = new WeakMap();
   var activeInlineCard = null;
-  var audioUnlocked = false;
+  var expandedCard = null;
+  // Wider than any phone: show games at a typical phone's screen size.
+  var PHONE_MAX_WIDTH = 500;
+  var PHONE_SCREEN = { width: 390, height: 844 };
 
-  function hostMessage(frame, type, extra) {
+  function hostMessage(frame, type) {
     if (!frame || !frame.contentWindow) return;
-    frame.contentWindow.postMessage(Object.assign({ beeplayHost: type }, extra || {}), "*");
+    frame.contentWindow.postMessage({ beeplayHost: type }, "*");
   }
+
+  function gameScreen() {
+    if (window.innerWidth > PHONE_MAX_WIDTH) return PHONE_SCREEN;
+    return { width: window.innerWidth, height: window.innerHeight };
+  }
+
+  function fitStage(windowElement) {
+    var stage = windowElement.querySelector(".game-stage");
+    if (!stage || !windowElement.clientWidth || !windowElement.clientHeight) return;
+    var screen = gameScreen();
+    var scale = Math.min(1, windowElement.clientWidth / screen.width,
+      windowElement.clientHeight / screen.height);
+    stage.style.width = screen.width + "px";
+    stage.style.height = screen.height + "px";
+    stage.style.setProperty("--game-scale", scale.toFixed(4));
+  }
+
+  function fitStages() {
+    document.querySelectorAll(".game-window").forEach(fitStage);
+  }
+
+  // Game windows change size without a window resize too: the tray's
+  // max-height breakpoint, htmx swaps, and expanding or collapsing a game.
+  // Cards are one screen tall, so a resize (rotation, the address bar, a
+  // desktop window) moves every card; keep the active one aligned. The
+  // observer runs after layout, when the window's resize event may not.
+  function alignFeed() {
+    var feed = document.getElementById("homeFeed");
+    if (feed && activeInlineCard && feed.contains(activeInlineCard)) {
+      feed.scrollTo({ top: activeInlineCard.offsetTop, behavior: "instant" });
+    }
+  }
+  var stageObserver = window.ResizeObserver
+    ? new ResizeObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.target.id === "homeFeed") alignFeed();
+          else fitStage(entry.target);
+        });
+      })
+    : null;
+  window.addEventListener("resize", function () {
+    fitStages();
+    alignFeed();
+  });
 
   function activateInlineGame(card) {
     if (!card || card === activeInlineCard) return;
+    if (expandedCard) collapseGame();
     var candidates = [].slice.call(document.querySelectorAll(".game-card"));
     var activeIndex = candidates.indexOf(card);
     candidates.forEach(function (candidate, index) {
@@ -731,11 +779,7 @@
         frame.setAttribute("src", frame.dataset.src);
       }
       candidate.classList.toggle("active-game", active);
-      hostMessage(frame, active ? "activate" : "deactivate", {
-        muted: !audioUnlocked,
-        transition_ms: 200,
-        viewport_mode: candidate.dataset.viewportMode || "fixed"
-      });
+      hostMessage(frame, active ? "activate" : "deactivate");
       if (active) {
         var play = inlinePlays.get(frame);
         if (play && !play.started) {
@@ -751,6 +795,34 @@
     });
     activeInlineCard = card;
   }
+
+  function expandGame(card) {
+    if (!card || expandedCard === card) return;
+    if (card !== activeInlineCard) activateInlineGame(card);
+    expandedCard = card;
+    card.classList.add("expanded");
+    document.body.classList.add("game-expanded");
+    // The phone's back gesture (and WeChat's back button) collapses the game
+    // instead of leaving BeePlay.
+    history.pushState({ beeplayExpanded: true }, "");
+    fitStage(card.querySelector(".game-window"));
+    var collapse = card.querySelector("[data-game-collapse]");
+    if (collapse) collapse.focus({ preventScroll: true });
+  }
+
+  function collapseGame(fromHistory) {
+    var card = expandedCard;
+    if (!card) return;
+    expandedCard = null;
+    card.classList.remove("expanded");
+    document.body.classList.remove("game-expanded");
+    if (!fromHistory && history.state && history.state.beeplayExpanded) history.back();
+    fitStage(card.querySelector(".game-window"));
+  }
+
+  window.addEventListener("popstate", function () {
+    if (expandedCard) collapseGame(true);
+  });
 
   function initInlineGames() {
     var cards = [].slice.call(document.querySelectorAll(".game-card"));
@@ -768,6 +840,7 @@
         loaded: false
       };
       inlinePlays.set(frame, play);
+      if (stageObserver) stageObserver.observe(card.querySelector(".game-window"));
       frame.addEventListener("load", function () {
         frame.classList.add("loaded");
         var loading = card.querySelector(".game-loading");
@@ -777,27 +850,17 @@
           clearTimeout(play.loadTimer);
           reportHealth(play, "loaded");
         }
-        hostMessage(frame, card === activeInlineCard ? "activate" : "deactivate", {
-          muted: !audioUnlocked,
-          transition_ms: 0,
-          viewport_mode: card.dataset.viewportMode || "fixed"
-        });
+        hostMessage(frame, card === activeInlineCard ? "activate" : "deactivate");
       });
     });
-    sizeInlineStages();
-    if (cards.length) activateInlineGame(cards[0]);
+    var feed = document.getElementById("homeFeed");
+    if (feed && stageObserver) stageObserver.observe(feed);
+    fitStages();
+    if (cards.length && !(activeInlineCard && document.contains(activeInlineCard))) {
+      activateInlineGame(sharedGameCard() || cards[0]);
+      alignFeed();
+    }
   }
-
-  function sizeInlineStages() {
-    document.querySelectorAll(".game-window").forEach(function (windowElement) {
-      var stage = windowElement.querySelector(".game-stage");
-      if (!stage) return;
-      var scale = Math.min(windowElement.clientWidth / 390, windowElement.clientHeight / 640);
-      stage.style.setProperty("--game-scale", Math.max(0.1, scale).toFixed(4));
-    });
-  }
-
-  window.addEventListener("resize", sizeInlineStages);
 
   window.addEventListener("message", function (event) {
     var matched = null;
@@ -818,26 +881,32 @@
     }
   });
 
+  document.addEventListener("click", function (event) {
+    if (!event.target.closest) return;
+    var expand = event.target.closest("[data-game-expand]");
+    if (expand) { expandGame(expand.closest(".game-card")); return; }
+    if (event.target.closest("[data-game-collapse]")) collapseGame();
+  });
+
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && expandedCard) collapseGame();
+  });
+
   var swipeStart = null;
   document.addEventListener("pointerdown", function (event) {
     var tray = event.target.closest && event.target.closest("[data-feed-swipe]");
     if (!tray) return;
-    swipeStart = { x: event.clientX, y: event.clientY, tray: tray, pointerId: event.pointerId };
+    swipeStart = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
   });
   document.addEventListener("pointerup", function (event) {
     if (!swipeStart || event.pointerId !== swipeStart.pointerId) return;
     var dy = event.clientY - swipeStart.y;
     var dx = event.clientX - swipeStart.x;
+    swipeStart = null;
     if (Math.abs(dy) > 44 && Math.abs(dy) > Math.abs(dx) * 1.2) {
       event.preventDefault();
-      audioUnlocked = true;
       moveFeed(dy < 0 ? 1 : -1);
-    } else if (!audioUnlocked) {
-      audioUnlocked = true;
-      var frame = activeInlineCard && activeInlineCard.querySelector(".game-frame");
-      hostMessage(frame, "activate", { muted: false, transition_ms: 200 });
     }
-    swipeStart = null;
   });
   document.addEventListener("pointercancel", function () { swipeStart = null; });
 
@@ -970,6 +1039,5 @@
   });
 
   syncChrome();
-  scrollToSharedGame();
   initInlineGames();
 })();

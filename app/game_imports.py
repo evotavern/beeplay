@@ -18,7 +18,7 @@ MAX_UNPACKED_BYTES = 100 * 1024 * 1024
 
 
 REPORTER_MARKER = b"<!--beeplay-reporter-->"
-REPORTER_VERSION = b"<!--beeplay-reporter-v4-->"
+REPORTER_VERSION = b"<!--beeplay-reporter-v5-->"
 REPORTER_END = b"<!--/beeplay-reporter-->"
 _REPORTER = (
     REPORTER_MARKER

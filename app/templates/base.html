@@ -1153,6 +1153,9 @@
     }
     body.mobile-preview.feed-mode .page,
     body.mobile-preview #homeView { height: 100dvh; min-height: 0; }
+    /* pageIn leaves a transform behind, which would make the expanded game's
+       position: fixed relative to the feed instead of the screen. */
+    body.mobile-preview #homeView { animation: none; }
     body.mobile-preview .home-feed {
       height: 100%; padding: 0; overflow: hidden; scroll-behavior: smooth;
       overscroll-behavior: none; touch-action: none;
@@ -1169,19 +1172,36 @@
       position: relative; display: grid; min-height: 0; overflow: hidden;
       place-items: center; background: #090b0b;
     }
+    /* The stage is the size of the phone screen the game would get on its
+       own (set by app.js) and is scaled evenly to fit the window; it never
+       reflows or clips the game. */
     .game-stage {
-      position: absolute; z-index: 2; top: 50%; left: 50%; width: 390px; height: 640px;
+      position: absolute; z-index: 2; top: 50%; left: 50%; width: 390px; height: 844px;
       flex: none; overflow: hidden; background: #111;
       transform: translate(-50%, -50%) scale(var(--game-scale, 1)); transform-origin: center;
       box-shadow: 0 0 0 1px rgba(255,255,255,.04);
     }
     .game-window .game-frame {
-      display: block; width: 390px; height: 640px; border: 0; background: #111;
+      display: block; width: 100%; height: 100%; border: 0; background: #111;
     }
-    /* Chromium paints a native iframe scrollbar outside the document's CSS.
-       Scroll-mode games get a narrow clipped gutter so it stays usable but
-       never appears as a second bar inside the game window. */
-    .game-card[data-viewport-mode="scroll"] .game-frame { width: 406px; }
+    .game-expand, .game-collapse {
+      position: absolute; z-index: 4; display: grid; place-items: center; padding: 0;
+      border: 1px solid rgba(255,255,255,.18); color: #fff; background: rgba(9,11,11,.62);
+    }
+    .game-expand svg, .game-collapse svg {
+      width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2;
+      stroke-linecap: round; stroke-linejoin: round;
+    }
+    .game-expand { right: 6px; bottom: 6px; width: 34px; height: 34px; border-radius: 12px; }
+    .game-collapse {
+      display: none; top: calc(4px + env(safe-area-inset-top)); left: 50%; width: 48px; height: 24px;
+      border-radius: 999px; transform: translateX(-50%);
+    }
+    /* Expanded: the same frame, unscaled, over the whole screen. */
+    .game-card.expanded .game-window { position: fixed; inset: 0; z-index: 85; }
+    .game-card.expanded .game-expand { display: none; }
+    .game-card.expanded .game-collapse { display: grid; }
+    body.game-expanded .bottom-nav { display: none; }
     .game-loading {
       position: absolute; inset: 0; z-index: 1; display: grid; place-content: center;
       justify-items: center; gap: 10px; color: var(--ink); background: var(--lime-light);
@@ -1193,7 +1213,7 @@
     .game-tray {
       position: relative; z-index: 3; height: var(--tray-height); min-height: 0;
       padding: 13px 14px calc(70px + env(safe-area-inset-bottom));
-      color: var(--white); background: var(--ink); touch-action: pan-y;
+      color: var(--white); background: var(--ink); touch-action: none;
       user-select: none; cursor: grab;
     }
     .tray-handle {

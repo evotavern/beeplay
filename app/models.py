@@ -7,7 +7,6 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 # crashing; the owner still sees it. unlisted: test games, reachable by link.
 # deleted: gone from every list; the artifact stays on disk.
 STATUSES = ("live", "hidden", "unlisted", "deleted")
-VIEWPORT_MODES = ("fixed", "compress", "scroll")
 
 
 def utcnow() -> datetime:
@@ -99,8 +98,6 @@ class Work(Base):
     status: Mapped[str] = mapped_column(default="live", server_default="live", index=True)
 
     description: Mapped[str | None] = mapped_column(default=None)
-    # How a legacy document is adapted to BeePlay's fixed 390x640 game canvas.
-    viewport_mode: Mapped[str] = mapped_column(default="fixed", server_default="fixed")
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 

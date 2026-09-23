@@ -78,20 +78,6 @@ class OpsTests(unittest.TestCase):
         with self.session() as session:
             self.assertEqual(session.scalar(select(Work.status)), "unlisted")
 
-    def test_viewport_mode_is_audited(self) -> None:
-        self.run_ops(
-            "import", str(self.game), "--owner", "bee-2", "--title", "Tall",
-            "--category", "puzzle", "--emoji", "🎮",
-        )
-        self.run_ops("viewport", "1", "scroll")
-        with self.session() as session:
-            work = session.get(Work, 1)
-            event = session.scalar(
-                select(WorkEvent).where(WorkEvent.kind == "viewport_mode_changed")
-            )
-            self.assertEqual(work.viewport_mode, "scroll")
-            self.assertEqual(event.after, '{"viewport_mode": "scroll"}')
-
     def test_fix_and_insert_a_failed_upload_keeps_the_uploaders_details(self) -> None:
         with self.session() as session:
             user = session.scalar(select(User))

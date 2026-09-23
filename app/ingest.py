@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app import config, events
 from app.game_imports import install_folder
-from app.models import STATUSES, VIEWPORT_MODES, FailedUpload, User, Work
+from app.models import STATUSES, FailedUpload, User, Work
 
 ARTS = ("art-one", "art-two", "art-three", "art-four")
 
@@ -122,20 +122,6 @@ def replace(
     session.commit()
     if reactivate and work.status == "hidden":
         set_status(session, work, "live", actor=actor)
-
-
-def set_viewport_mode(session: Session, work: Work, mode: str, *, actor: str) -> None:
-    if mode not in VIEWPORT_MODES:
-        raise ValueError(f"viewport mode must be one of {', '.join(VIEWPORT_MODES)}")
-    if work.viewport_mode == mode:
-        return
-    before = work.viewport_mode
-    work.viewport_mode = mode
-    events.record(
-        session, work, actor=actor, kind="viewport_mode_changed",
-        before={"viewport_mode": before}, after={"viewport_mode": mode},
-    )
-    session.commit()
 
 
 def capture_failure(
