@@ -85,7 +85,6 @@
       body: hasBody ? JSON.stringify(body) : undefined,
       keepalive: !!keepalive
     });
-    if (response.status === 401) throw new Error("请先认领一个身份，再回来继续创作。");
     if (response.status === 204) return null;
     var data = await response.json();
     if (!response.ok) {
@@ -136,10 +135,6 @@
       if (status === "failed") message(errors[job.error] || "生成未完成，请重试。", true);
       else message(statusMessages[status]);
       el("generationElapsed").textContent = "已用 " + Math.floor(job.elapsed_ms / 1000) + " 秒";
-    } else if (!root().dataset.creator) {
-      // Unclaimed visitors can still press submit: it takes them to /claim.
-      message("先认领一个身份，就能开始创作。");
-      el("ideaSubmit").disabled = false;
     } else if (loaded) {
       if (configured) message("准备好了，写下你的游戏想法。");
       else message("生成服务尚未配置，请联系管理员添加 API key。", true);
@@ -151,11 +146,6 @@
     if (!root()) return;
     loaded = false;
     render();
-    if (!root().dataset.creator) {
-      loaded = true;
-      render();
-      return;
-    }
     try {
       var data = await api("/current");
       if (ticket !== epoch || !root()) return;
@@ -193,11 +183,6 @@
 
   async function start(retry) {
     if (!root() || starting) return;
-    if (!root().dataset.creator) {
-      storage("beeplay-prompt", el("ideaInput").value);
-      window.location.href = "/claim";
-      return;
-    }
     var prompt = el("ideaInput").value.trim();
     if (!prompt) {
       el("ideaInput").focus();
@@ -319,10 +304,11 @@
     button.disabled = true;
     previewMessage("正在发布…");
     try {
-      await api("/" + previewJob + "/publish", "POST", readDetails());
+      var published = await api("/" + previewJob + "/publish", "POST", readDetails());
       closePreview();
       job.status = "published";
       render();
+      if (published.ask_profile && window.BeeAccount) window.BeeAccount.askForProfile(true);
       window.location.href = "/";
     } catch (error) {
       previewProblem(error.message);

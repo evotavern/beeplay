@@ -1,0 +1,24 @@
+{# Swapped into #accountSheet by assets/js/account.js. `prompt` is the one-time
+   ask after a first publish: same form, friendlier words, and a skip. #}
+<div class="modal account-sheet" role="dialog" aria-modal="true" aria-labelledby="accountSheetTitle">
+  <div class="modal-head"><div>
+    <h2 id="accountSheetTitle">{% if prompt %}取个名字吧{% else %}编辑个人档案{% endif %}</h2>
+    <p>{% if prompt %}你的游戏已经上线了！大家会在游戏旁边看到这个名字和头像。{% else %}名字、简介和头像会显示在你的公开主页和作品上。{% endif %}</p>
+  </div><button class="close-button" type="button" data-account-close aria-label="关闭">×</button></div>
+  <form class="account-form" data-account-form="profile">
+    <div class="photo-row">
+      <img class="photo-preview" src="{{ user_avatar(current_user) }}" alt="" data-photo-preview />
+      <div class="photo-actions">
+        <label class="outline-button photo-pick">选择照片<input type="file" accept="image/*" data-photo-input hidden /></label>
+        <button type="button" class="link-button" data-photo-remove{% if not current_user.avatar_path %} hidden{% endif %}>移除照片</button>
+      </div>
+    </div>
+    <fieldset class="fill-row"><legend>没有照片时的头像颜色</legend>
+      {% for fill in avatar_fills %}<label><input type="radio" name="avatar_fill" value="{{ fill }}"{% if fill == current_user.avatar_fill %} checked{% endif %} /><span style="background:#{{ fill }}"></span></label>{% endfor %}
+    </fieldset>
+    <label>名字<input name="name" maxlength="20" required value="{{ current_user.name }}" /></label>
+    <label>简介 <small>可选</small><input name="bio" maxlength="120" value="{{ current_user.bio }}" placeholder="一句话介绍自己" /></label>
+    <p class="account-error" role="alert"></p>
+    <div class="account-buttons">{% if prompt %}<button type="button" class="outline-button" data-account-close>跳过</button>{% endif %}<button class="primary-button" type="submit">保存</button></div>
+  </form>
+</div>

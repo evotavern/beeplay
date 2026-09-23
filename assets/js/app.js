@@ -20,18 +20,6 @@
     toastTimer = setTimeout(function () { toast.classList.remove("show"); }, link ? 4000 : 2200);
   }
 
-  // Every way in through the create modal needs a claimed identity, so an
-  // unclaimed visitor is stopped at the button instead of after filling in
-  // (and uploading) a whole game. The claim brings them back with the modal open.
-  function promptClaim() {
-    var back = new URL(window.location.href);
-    back.searchParams.set("create", "1");
-    showToast("先选择一个身份，才能开始创作", {
-      href: "/claim?next=" + encodeURIComponent(back.pathname + back.search),
-      text: "去选择身份 →"
-    });
-  }
-
   // The swapped-in section is the only .view in the DOM, so it *is* the state.
   function currentView() {
     var view = document.querySelector("#viewport .view");
@@ -195,10 +183,6 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
     }).then(function (response) {
-      if (response.status === 401) {
-        window.location.href = "/claim";
-        throw new Error("identity required");
-      }
       return response.json().catch(function () { return {}; }).then(function (payload) {
         if (!response.ok) throw new Error(payload.detail || "操作没有保存，请重试");
         return payload;
@@ -224,7 +208,7 @@
         ? (action === "like" ? "已喜欢 " : "已收藏 ") + title
         : (action === "like" ? "已取消喜欢" : "已取消收藏"));
     } catch (error) {
-      if (error.message !== "identity required") showToast(error.message);
+      showToast(error.message);
     } finally {
       button.disabled = false;
     }
@@ -306,8 +290,7 @@
 
     var createButton = target.closest("[data-action='create']");
     if (createButton) {
-      if (createButton.getAttribute("aria-disabled") === "true") promptClaim();
-      else openCreateModal();
+      openCreateModal();
       return;
     }
 
@@ -477,10 +460,6 @@
           throw new Error(response.ok ? "导入失败" : "服务器拒绝了上传，请检查文件大小后重试");
         }).then(function (result) {
           answered = true;
-          if (response.status === 401) {
-            window.location.href = "/claim";
-            throw new Error(result.detail);
-          }
           if (!response.ok) throw new Error(result.detail || "导入失败");
           return result;
         });
@@ -493,18 +472,18 @@
           var card = document.querySelector('.game-card[data-artifact="' + game.artifact + '"]');
           if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
           showToast("“" + game.title + "” 已加入游戏流");
+          if (game.ask_profile && window.BeeAccount) window.BeeAccount.askForProfile(false);
         });
       })
       .catch(function (error) {
         // A refusal the app answered is already in the server's log.
         if (!answered) reportUploadFailure(error, httpStatus);
         document.getElementById("importStatus").textContent = error.message;
-        // A 401 has already sent the page to /claim, taking the form with it.
         if (window.beeplayReport) {
           window.beeplayReport("shown", error.message, {
             area: "creation",
-            next: httpStatus === 401 ? "redirected" : "stayed",
-            lost: httpStatus === 401,
+            next: "stayed",
+            lost: false,
             status: httpStatus || null
           });
         }
@@ -763,17 +742,6 @@
     if (event.key === "Escape" && gamePlaying()) pauseGame();
   });
 
-  // Back from /claim?next=…?create=1: finish what the visitor was starting.
-  function resumeCreate() {
-    var here = new URL(window.location.href);
-    if (here.searchParams.get("create") !== "1") return;
-    here.searchParams.delete("create");
-    history.replaceState(history.state, "", here.pathname + here.search + here.hash);
-    var createButton = document.querySelector("[data-action='create']");
-    if (createButton && createButton.getAttribute("aria-disabled") !== "true") openCreateModal();
-  }
-
   syncChrome();
   scrollToSharedGame();
-  resumeCreate();
 })();

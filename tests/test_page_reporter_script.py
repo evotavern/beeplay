@@ -33,8 +33,9 @@ class PageReporterTests(unittest.TestCase):
     def test_every_upload_failure_reports_what_the_player_was_shown(self) -> None:
         shown = SCRIPT.index('window.beeplayReport("shown", error.message')
         self.assertLess(SCRIPT.index('textContent = error.message;'), shown)
-        self.assertIn('next: httpStatus === 401 ? "redirected" : "stayed"', SCRIPT)
-        self.assertIn("lost: httpStatus === 401", SCRIPT)
+        # Nothing sends the uploader away any more: the form stays filled in.
+        self.assertIn('next: "stayed"', SCRIPT)
+        self.assertIn("lost: false", SCRIPT)
 
     def test_generation_errors_report_the_message_they_put_on_screen(self) -> None:
         generation = (ROOT / "assets" / "js" / "generation.js").read_text()

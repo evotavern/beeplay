@@ -45,8 +45,7 @@ class RecordTests(unittest.TestCase):
         Base.metadata.create_all(engine)
         with Session(engine) as session, tempfile.TemporaryDirectory() as directory:
             owner = User(
-                slug="bee-2", name="小蜜蜂", handle="@b", bio="", avatar_fill="fff",
-                level=1, xp=0, xp_goal=1, position=0,
+                slug="bee-2", name="小蜜蜂", avatar_fill="fff",
             )
             session.add(owner)
             session.flush()

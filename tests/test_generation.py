@@ -24,7 +24,7 @@ class GenerationTests(test_http.HttpTestCase):
         super().setUp()
         self.keys_patch = patch.object(config, "EVOMAP_KEYS", ("test-key-one", "test-key-two"))
         self.keys_patch.start()
-        self.claim()
+        self.sign_up()
 
     def tearDown(self):
         self.keys_patch.stop()
@@ -81,7 +81,9 @@ class GenerationTests(test_http.HttpTestCase):
             first = self.client.post(f"/api/generations/{id}/publish", json=DETAILS)
             second = self.client.post(f"/api/generations/{id}/publish", json=DETAILS)
         self.assertEqual(first.status_code, 200, first.text)
-        self.assertEqual(first.json(), second.json())
+        self.assertEqual(first.json()["work_id"], second.json()["work_id"])
+        # The name prompt comes with the first answer only.
+        self.assertEqual((first.json()["ask_profile"], second.json().get("ask_profile", False)), (True, False))
         alert.assert_called_once()
         self.assertIn("Honey Hop", alert.call_args.args[0])
         with db.SessionLocal() as session:
@@ -119,22 +121,29 @@ class GenerationTests(test_http.HttpTestCase):
         self.assertEqual(self.submit(request_id=id).json()["id"], id)
         self.assertEqual(self.submit().status_code, 409)
 
-    def test_another_claim_cannot_access_a_job_or_preview(self):
+    def test_another_account_cannot_access_a_job_or_preview(self):
         id = self.submit().json()["id"]
         self.run_job(id)
-        self.claim("bee-3")
+        self.client.cookies.clear()
+        self.assertEqual(self.client.get(f"/api/generations/{id}").status_code, 404)
+        self.assertIsNone(self.client.get("/api/generations/current").json()["job"])
+        self.sign_up()
         self.assertEqual(self.client.get(f"/api/generations/{id}").status_code, 404)
         self.assertEqual(self.client.get(f"/api/generations/{id}/preview").status_code, 404)
         self.assertIsNone(self.client.get("/api/generations/current").json()["job"])
-        self.claim("bee-2")
-        # Same random profile, newly issued claim: old drafts remain private.
-        self.assertEqual(self.client.get(f"/api/generations/{id}").status_code, 404)
+
+    def test_starting_a_generation_makes_an_account(self):
+        self.client.cookies.clear()
+        response = self.submit()
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertIsNotNone(self.current())
+        self.assertEqual(self.client.get("/api/generations/current").json()["job"]["id"], response.json()["id"])
 
     def test_auth_origin_and_input_guards(self):
         self.assertEqual(self.submit(prompt="   ").status_code, 422)
         self.assertEqual(self.client.post("/api/generations", headers={"Origin": "https://evil.example"}, json={"prompt": "x", "request_id": str(uuid.uuid4())}).status_code, 403)
         self.client.cookies.clear()
-        self.assertEqual(self.submit().status_code, 401)
+        self.assertEqual(self.client.put(f"/api/generations/{uuid.uuid4()}/details", json=DETAILS).status_code, 404)
 
     def test_no_keys_is_explicitly_unavailable(self):
         with patch.object(config, "EVOMAP_KEYS", ()):

@@ -1,12 +1,8 @@
 import hashlib
-import os
 from functools import lru_cache
-import secrets
 from contextlib import asynccontextmanager
-from math import ceil
 from pathlib import Path
 from typing import Literal
-from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -16,32 +12,29 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
-from app.avatars import avatar
-from app.data import PROFILE_TABS
+from app.avatars import avatar, user_avatar
+from app.data import AVATAR_FILLS, PROFILE_TABS
 from app.db import get_session, init_db
-from app import browsers, config, events, generation, health, ingest, people, ux
+from app import accounts, browsers, config, events, generation, health, ingest, people, ux
+from app.account_routes import router as account_router
 from app.game_imports import GameImportError, pack_zip, read_zip
 from app.generation_routes import router as generation_router
-from app.identity import current_identity
+from app.identity import account, current_user, ensure_user
 from app.models import User
 from app.repository import (
-    COOKIE_NAME,
-    all_users,
-    claim,
-    cookie_value,
     discover_works,
     feed_games,
-    is_claimed,
     liked_works,
-    next_free_at,
+    likes_received,
     profile_works,
+    public_works,
     record_share,
     record_view,
     saved_count,
     saved_works,
     set_like,
     set_save,
-    utcnow,
+    user_by_handle,
     viewed_works,
     works_count,
 )
@@ -57,18 +50,8 @@ GAMES_DIR = config.GAMES_DIR
 # immediately and it raises on a missing directory, which happens before any
 # lifespan hook runs. games/ is gitignored, so a fresh checkout has none.
 GAMES_DIR.mkdir(parents=True, exist_ok=True)
-
-# A month, so a tester's phone keeps the cookie across the whole event. The
-# claim itself expires long before this; the cookie only has to outlive it.
-COOKIE_MAX_AGE = 30 * 24 * 60 * 60
-CSRF_COOKIE_NAME = "beeplay_claim_csrf"
-CSRF_TOKEN_BYTES = 32
-
-# The current public deployment is IP-only HTTP. Claims are bearer-token
-# authentication, so production must not issue them over that transport. This
-# opt-in keeps local HTTP development convenient without silently weakening a
-# real deployment.
-ALLOW_INSECURE_CLAIMS = os.environ.get("BEEPLAY_ALLOW_INSECURE_CLAIMS") == "1"
+# Same reason as GAMES_DIR: StaticFiles needs it to exist at import.
+config.AVATARS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @asynccontextmanager
@@ -82,13 +65,8 @@ async def lifespan(app: FastAPI):
         worker.close()
 
 
-def claims_are_secure(request: Request) -> bool:
-    """Whether this request may issue or use a bearer claim cookie."""
-    return request.url.scheme == "https" or ALLOW_INSECURE_CLAIMS
-
-
 def local_path(target: str) -> str:
-    """Where to land after a claim: a path on this site, never another host.
+    """Where to land after a login: a path on this site, never another host.
 
     "//host" and "/\\host" are protocol-relative in browsers, so a bare
     leading slash is not enough to stay on this origin. Browsers also drop
@@ -101,20 +79,12 @@ def local_path(target: str) -> str:
     return "/"
 
 
-def csrf_token(request: Request) -> tuple[str, bool]:
-    """Return a double-submit CSRF token and whether it needs setting."""
-    token = request.cookies.get(CSRF_COOKIE_NAME)
-    if token:
-        return token, False
-    return secrets.token_urlsafe(CSRF_TOKEN_BYTES), True
-
-
 app = FastAPI(
     title="Beeplay",
     lifespan=lifespan,
-    # Applied to every route so base.html can render the claimed user's avatar
-    # without each handler having to ask for it.
-    dependencies=[Depends(current_identity)],
+    # Applied to every route so base.html can render the signed-in user's
+    # avatar without each handler having to ask for it.
+    dependencies=[Depends(current_user)],
 )
 
 
@@ -122,7 +92,7 @@ app = FastAPI(
 async def log_failed_requests(request: Request, call_next) -> Response:
     """Every 4xx/5xx and every crash lands in events.jsonl for `beeplay-ops ux`.
 
-    Only the path is kept: query strings can carry tokens (the claim CSRF).
+    Only the path is kept: query strings can carry tokens (a password-reset link).
     """
     where = {"method": request.method, "path": request.url.path}
     client = browsers.fields(request.headers.get("user-agent"))
@@ -165,6 +135,17 @@ class GameFiles(StaticFiles):
 
 app.mount("/games", GameFiles(directory=GAMES_DIR), name="games")
 
+
+class AvatarFiles(StaticFiles):
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
+
+
+# Development convenience again: Caddy serves /avatars/* from disk.
+app.mount("/avatars", AvatarFiles(directory=config.AVATARS_DIR), name="avatars")
+
 @lru_cache
 def asset(path: str) -> str:
     """URL for a file under assets/, versioned by its contents.
@@ -182,6 +163,8 @@ templates = Jinja2Templates(directory=BASE_DIR / "app" / "templates")
 # forwards env options through the Jinja2Templates constructor.
 templates.env.keep_trailing_newline = True
 templates.env.globals["avatar"] = avatar
+templates.env.globals["user_avatar"] = user_avatar
+templates.env.globals["avatar_fills"] = AVATAR_FILLS
 templates.env.globals["asset"] = asset
 templates.env.globals["load_timeout_s"] = config.LOAD_TIMEOUT_S
 
@@ -193,7 +176,7 @@ def render_view(request: Request, view: str, **context) -> HTMLResponse:
     document; an htmx nav click only needs what goes inside #viewport.
     """
     template = f"views/{view}.html" if "HX-Request" in request.headers else "base.html"
-    user, _ = getattr(request.state, "identity", (None, "anonymous"))
+    user = getattr(request.state, "user", None)
     return templates.TemplateResponse(
         request, template, {"view": view, "current_user": user, **context}
     )
@@ -244,9 +227,8 @@ def profile_context(session: Session, user: User, tab: str) -> dict:
 def home(
     request: Request,
     session: Session = Depends(get_session),
-    identity: tuple[User | None, str] = Depends(current_identity),
+    user: User | None = Depends(current_user),
 ) -> HTMLResponse:
-    user, _ = identity
     return render_view(request, "home", games=feed_games(session, user))
 
 
@@ -255,9 +237,8 @@ def discover(
     request: Request,
     category: str = "all",
     session: Session = Depends(get_session),
-    identity: tuple[User | None, str] = Depends(current_identity),
+    user: User | None = Depends(current_user),
 ) -> HTMLResponse:
-    user, _ = identity
     return render_view(request, "discover", **discover_context(session, category, user))
 
 
@@ -271,102 +252,54 @@ def messages(request: Request) -> HTMLResponse:
     return render_view(request, "messages")
 
 
-@app.get("/claim", response_class=HTMLResponse)
-def claim_grid(
-    request: Request,
-    notice: str | None = None,
-    next_url: str = Query("/", alias="next"),
-    session: Session = Depends(get_session),
-    identity: tuple[User | None, str] = Depends(current_identity),
-) -> HTMLResponse:
-    """The identity picker.
-
-    Always a full document, never an htmx partial: it is the one page reached
-    by a plain link and by a redirect from anywhere else in the app.
-    """
-    user, _ = identity
-    now = utcnow()
-    free_at = next_free_at(session)
-    token, set_csrf_cookie = csrf_token(request)
-    response = templates.TemplateResponse(
-        request,
-        "base.html",
-        {
-            "view": "claim",
-            "current_user": user,
-            "claims_enabled": claims_are_secure(request),
-            "csrf_token": token,
-            "notice": notice,
-            "next_url": local_path(next_url),
-            "identities": [
-                {
-                    "user": candidate,
-                    "claimed": is_claimed(candidate, now),
-                    "mine": user is not None and candidate.id == user.id,
-                }
-                for candidate in all_users(session)
-            ],
-            "minutes_until_free": (
-                ceil((free_at - now).total_seconds() / 60) if free_at else None
-            ),
-        },
-    )
-    if set_csrf_cookie:
-        response.set_cookie(
-            CSRF_COOKIE_NAME,
-            token,
-            max_age=COOKIE_MAX_AGE,
-            httponly=True,
-            samesite="lax",
-            secure=request.url.scheme == "https",
-        )
-    return response
+@app.get("/claim")
+def claim_grid() -> Response:
+    """The old identity picker. Printed links still point here."""
+    return RedirectResponse("/profile", status_code=303)
 
 
-@app.post("/claim/{slug}")
-def claim_identity(
-    slug: str,
-    request: Request,
-    csrf_token: str = "",
-    next_url: str = Query("/", alias="next"),
-    session: Session = Depends(get_session),
-    identity: tuple[User | None, str] = Depends(current_identity),
-) -> Response:
-    if not claims_are_secure(request):
-        raise HTTPException(status_code=403, detail="Claims require HTTPS")
-    csrf_cookie = request.cookies.get(CSRF_COOKIE_NAME)
-    if not csrf_cookie or not secrets.compare_digest(csrf_token, csrf_cookie):
-        raise HTTPException(status_code=403, detail="Invalid claim request")
-
-    holder, _ = identity
-    token = claim(session, slug, holder)
-    target = local_path(next_url)
-    if token is None:
-        return redirect(request, "/claim?notice=taken&next=" + quote(target, safe="/"))
-
-    response = redirect(request, target)
-    response.set_cookie(
-        COOKIE_NAME,
-        cookie_value(slug, token),
-        max_age=COOKIE_MAX_AGE,
-        httponly=True,
-        samesite="lax",
-        secure=request.url.scheme == "https",
-    )
-    return response
+def with_cookies(source: Response, target: Response) -> Response:
+    """Copy Set-Cookie from FastAPI's injected response onto one we built."""
+    for name, value in source.raw_headers:
+        if name == b"set-cookie":
+            target.raw_headers.append((name, value))
+    return target
 
 
 @app.get("/profile", response_class=HTMLResponse)
 def profile(
     request: Request,
+    response: Response,
     tab: str = "works",
     session: Session = Depends(get_session),
-    identity: tuple[User | None, str] = Depends(current_identity),
 ) -> Response:
-    user, status = identity
-    if user is None:
-        return _bounce_to_claim(request, status)
-    return render_view(request, "profile", **profile_context(session, user, tab))
+    """Your own profile. Opening it is one of the things that makes an account."""
+    user = ensure_user(request, response, session)
+    return with_cookies(
+        response, render_view(request, "profile", **profile_context(session, user, tab))
+    )
+
+
+@app.get("/u/{slug}", response_class=HTMLResponse)
+def public_profile(
+    slug: str,
+    request: Request,
+    session: Session = Depends(get_session),
+    viewer: User | None = Depends(current_user),
+) -> HTMLResponse:
+    owner = user_by_handle(session, slug)
+    if owner is None:
+        raise HTTPException(status_code=404, detail="没有这个用户")
+    works = public_works(session, owner, viewer)
+    return render_view(
+        request,
+        "user",
+        profile_user=owner,
+        profile_works=works,
+        works_total=len(works),
+        likes_total=likes_received(session, owner),
+        is_me=viewer is not None and viewer.id == owner.id,
+    )
 
 
 @app.get("/partials/works", response_class=HTMLResponse)
@@ -374,9 +307,8 @@ def works_partial(
     request: Request,
     category: str = "all",
     session: Session = Depends(get_session),
-    identity: tuple[User | None, str] = Depends(current_identity),
+    user: User | None = Depends(current_user),
 ) -> HTMLResponse:
-    user, _ = identity
     return templates.TemplateResponse(
         request, "partials/work_grid.html", discover_context(session, category, user)
     )
@@ -387,11 +319,10 @@ def profile_works_partial(
     request: Request,
     tab: str = "works",
     session: Session = Depends(get_session),
-    identity: tuple[User | None, str] = Depends(current_identity),
+    user: User | None = Depends(current_user),
 ) -> Response:
-    user, status = identity
     if user is None:
-        return _bounce_to_claim(request, status)
+        return redirect(request, "/profile")
     return templates.TemplateResponse(
         request, "partials/profile_grid.html", profile_context(session, user, tab)
     )
@@ -408,16 +339,13 @@ def import_game(
     files: list[UploadFile] | None = File(None),
     paths: list[str] | None = Form(None),
     session: Session = Depends(get_session),
-    identity: tuple[User | None, str] = Depends(current_identity),
-) -> JSONResponse:
+    user: User = Depends(account),
+) -> dict:
     """Publish a finished static game from the creator modal, live at once.
 
     A bundle that fails validation is not simply refused: it is kept, the
     team is alerted, and the uploader is pointed at the hackathon staff.
     """
-    user, _ = identity
-    if user is None:
-        raise HTTPException(status_code=401, detail="先认领一个身份，再上传游戏吧")
     try:
         details = ingest.validate_details(
             title=title, category=category, emoji=emoji, art=art, description=description
@@ -437,7 +365,7 @@ def import_game(
             if len(uploaded) != len(relative_paths):
                 raise GameImportError("游戏文件路径不完整")
         game = ingest.publish(
-            session, owner=user, details=details, entries=entries, actor=f"user:{user.slug}"
+            session, owner=user, details=details, entries=entries, actor=f"user:{user.id}"
         )
     except GameImportError as error:
         ingest.capture_failure(
@@ -451,7 +379,11 @@ def import_game(
             status_code=422,
             detail=f"这个游戏包有点闹脾气 🐝（{error}）。别慌，去找黑客松工作人员，我们帮你把它送上首页！",
         ) from error
-    return JSONResponse({"title": game.title, "artifact": game.artifact_hash})
+    return {
+        "title": game.title,
+        "artifact": game.artifact_hash,
+        "ask_profile": accounts.take_profile_prompt(session, user),
+    }
 
 
 class HealthReport(BaseModel):
@@ -479,11 +411,8 @@ def update_like(
     work_id: int,
     change: SocialToggle,
     session: Session = Depends(get_session),
-    identity: tuple[User | None, str] = Depends(current_identity),
+    user: User = Depends(account),
 ) -> dict:
-    user, _ = identity
-    if user is None:
-        raise HTTPException(status_code=401, detail="先认领一个身份，再喜欢作品吧")
     try:
         active, count = set_like(session, user, work_id, change.active)
     except LookupError as error:
@@ -496,11 +425,8 @@ def update_save(
     work_id: int,
     change: SocialToggle,
     session: Session = Depends(get_session),
-    identity: tuple[User | None, str] = Depends(current_identity),
+    user: User = Depends(account),
 ) -> dict:
-    user, _ = identity
-    if user is None:
-        raise HTTPException(status_code=401, detail="先认领一个身份，再收藏作品吧")
     try:
         active = set_save(session, user, work_id, change.active)
     except LookupError as error:
@@ -513,9 +439,8 @@ def create_view(
     work_id: int,
     event: SocialEvent,
     session: Session = Depends(get_session),
-    identity: tuple[User | None, str] = Depends(current_identity),
+    user: User | None = Depends(current_user),
 ) -> dict:
-    user, _ = identity
     try:
         count = record_view(session, user, work_id, event.event_id)
     except LookupError as error:
@@ -528,9 +453,8 @@ def create_share(
     work_id: int,
     event: SocialEvent,
     session: Session = Depends(get_session),
-    identity: tuple[User | None, str] = Depends(current_identity),
+    user: User | None = Depends(current_user),
 ) -> dict:
-    user, _ = identity
     try:
         count = record_share(session, user, work_id, event.event_id)
     except LookupError as error:
@@ -594,21 +518,16 @@ def client_error(report: ClientError, request: Request) -> Response:
     return Response(status_code=204)
 
 
-def _bounce_to_claim(request: Request, status: str) -> Response:
-    """Send an unidentified visitor to the picker, clearing a dead cookie."""
-    target = "/claim?notice=stolen" if status == "stolen" else "/claim"
-    response = redirect(request, target)
-    if status == "stolen":
-        response.delete_cookie(COOKIE_NAME)
-    return response
-
-
 app.include_router(generation_router)
+app.include_router(account_router)
 
 
 @app.middleware("http")
 async def private_generation_responses(request: Request, call_next):
     response = await call_next(request)
-    if request.url.path.startswith("/api/generations"):
+    if request.url.path.startswith(("/api/generations", "/api/account")):
         response.headers["Cache-Control"] = "no-store"
+    # The pre-accounts claim cookie means nothing now; drop it on sight.
+    if accounts.LEGACY_COOKIE_NAME in request.cookies:
+        response.delete_cookie(accounts.LEGACY_COOKIE_NAME)
     return response

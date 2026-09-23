@@ -1,3 +1,4 @@
+      {% from "macros.html" import author_link %}
       <section class="view active" id="homeView" data-view="home">
         <div class="home-feed" id="homeFeed" aria-label="可上下滑动的游戏流">
           {% for game in games %}
@@ -6,7 +7,7 @@
             <div class="game-scene" aria-hidden="true">
               <span class="scene-sun"></span><span class="scene-ground"></span><span class="scene-piece emoji">{{ game.emoji }}</span>
             </div>
-            <div class="game-copy"><h2>{{ game.title }}</h2><p>{{ game.category }} · 互动小游戏</p><div class="game-author">{{ game.author }}</div></div>
+            <div class="game-copy"><h2>{{ game.title }}</h2><p>{{ game.category }} · 互动小游戏</p>{{ author_link(game, "game-author") }}</div>
             <div class="game-actions">
               <button class="game-action play-game" data-game-action="play" aria-label="试玩 {{ game.title }}">▶</button>
               <button class="game-action{% if game.liked_by_viewer %} active{% endif %}" data-game-action="like" aria-pressed="{{ 'true' if game.liked_by_viewer else 'false' }}" aria-label="喜欢 {{ game.title }}">♥<small data-social-count="likes">{{ game.like_count }}</small></button>

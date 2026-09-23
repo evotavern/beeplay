@@ -1,0 +1,20 @@
+      {% from "macros.html" import work_card %}
+      <section class="view active" id="userView" data-view="user">
+        <div class="profile-layout">
+          <aside class="profile-card">
+            <img class="profile-avatar" src="{{ user_avatar(profile_user) }}" alt="{{ profile_user.name }}" />
+            <div><h2>{{ profile_user.name }}</h2><div class="handle">{{ profile_user.handle }}</div>{% if profile_user.bio %}<p class="profile-bio">{{ profile_user.bio }}</p>{% endif %}</div>
+            {% if is_me %}<div class="profile-actions"><a class="profile-switch" href="/profile" hx-get="/profile">这是你 · 去编辑 ↗</a></div>{% endif %}
+            <div class="profile-stats"><div class="profile-stat"><strong>{{ works_total }}</strong><span>作品</span></div><div class="profile-stat"><strong>{{ likes_total }}</strong><span>获赞</span></div></div>
+          </aside>
+          <div class="profile-content">
+            <div class="profile-topline"><div><h1>{{ profile_user.name }} 的作品</h1></div></div>
+            <div class="profile-work-grid">
+              {% for work in profile_works %}{{ work_card(work) }}
+              {% else %}
+              <div class="empty-state"><div><div style="font-size: 56px;">🐝</div><h3>还没有公开的作品</h3><p>过段时间再来看看吧。</p></div></div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </section>

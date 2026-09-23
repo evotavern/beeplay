@@ -1,3 +1,4 @@
+      {% from "macros.html" import author_link %}
       <section class="view active" id="discoverView" data-view="discover">
         <div class="view-header">
           <div><h1>探索好玩的<br />新作品。</h1><p>把别人的灵感变成你的下一次开始。先试玩，再收藏，也可以一键 Remix。</p></div>
@@ -14,8 +15,7 @@
               <div>
                 <h2 class="feature-title">{{ featured_work.title }}</h2>
                 <div class="feature-meta">
-                  <img class="mini-avatar" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Ccircle cx='40' cy='40' r='40' fill='%23b5d65a'/%3E%3Cpath d='M22 62c3-15 12-23 18-23s15 8 18 23' fill='%23171b1a'/%3E%3Ccircle cx='40' cy='28' r='13' fill='%23f8fbe8'/%3E%3C/svg%3E" alt="" />
-                  <span>{{ featured_work.author }} · {{ featured_work.category }}</span>
+                  {{ author_link(featured_work, "feature-author") }}<span>· {{ featured_work.category }}</span>
                 </div>
               </div>
               <div class="feature-bottom"><div class="feature-stats"><span>◉ {{ featured_work.view_count }}</span><span>♥ {{ featured_work.like_count }}</span></div><button class="feature-cta" hx-get="/?game={{ featured_work.artifact_hash }}" hx-target="#viewport">立即试玩</button></div>

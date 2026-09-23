@@ -13,6 +13,9 @@
     beeplay-ops migrate                      # schema + seed; release.sh runs it
     beeplay-ops generations [--id ID]        # prompt-to-game speed and funnel
     beeplay-ops generation-keys [--enable ID] # provider key health and usage
+    beeplay-ops user HANDLE_OR_ID            # one account (ux shows ids as u<id>)
+    beeplay-ops reset-password HANDLE        # one-time link, valid 24 h
+    beeplay-ops avatar-remove HANDLE         # back to the default avatar
 
 SSH access is the only authentication. Every change is audited as ops:<user>.
 """
@@ -27,14 +30,14 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app import config, db, generation, health, ingest, ux
+from app import accounts, config, db, generation, health, ingest, ux
 from app.game_imports import GameImportError, read_zip, reporter_is_current
 from app.models import (
     STATUSES, FailedUpload, Generation, GenerationAttempt, GenerationEvent, GenerationKey,
-    User, Work, WorkEvent, utcnow,
+    User, UserSession, Work, WorkEvent, WorkLike, utcnow,
 )
 
 
@@ -267,6 +270,49 @@ def cmd_generation_keys(session, args):
             "last_reported_limits": json.loads(attempts[-1].limits) if attempts else {}}, ensure_ascii=False))
 
 
+def _account(session: Session, reference: str) -> User:
+    """An account by handle, @handle, or the u<id> the ux check prints."""
+    reference = reference.lstrip("@").lower()
+    if reference[:1] == "u" and reference[1:].isdigit():
+        user = session.get(User, int(reference[1:]))
+    else:
+        user = session.scalar(select(User).where(User.slug == reference))
+    if user is None:
+        raise SystemExit(f"no account {reference}")
+    return user
+
+
+def cmd_user(session: Session, args) -> None:
+    user = _account(session, args.account)
+    works = session.scalars(select(Work).where(Work.user_id == user.id, Work.status != "deleted"))
+    devices = session.scalars(select(UserSession).where(UserSession.user_id == user.id)).all()
+    likes = session.scalar(select(func.count()).select_from(WorkLike).where(WorkLike.user_id == user.id))
+    print(f"u{user.id}  @{user.slug}{'' if user.handle_locked else ' (automatic)'}  {user.name}")
+    print(f"created {user.created_at:%m-%d %H:%M}  password {'set' if user.password_hash else 'none'}"
+          f"  photo {user.avatar_path or '-'}  devices {len(devices)}  likes {likes}")
+    for work in works:
+        print(f"  work {work.id:>4}  {work.status:<8}  {work.title}")
+
+
+def cmd_reset_password(session: Session, args) -> None:
+    user = _account(session, args.account)
+    if user.password_hash is None:
+        # Nothing to reset: without a password the account is only on the
+        # device that made it, and that device is still signed in.
+        raise SystemExit(f"@{user.slug} has no password; there is nothing to reset")
+    token = accounts.issue_reset(session, user.slug)
+    print(f"{config.PUBLIC_URL}/reset?token={token}")
+    print(f"one use, valid {int(accounts.RESET_TTL.total_seconds() // 3600)} h; "
+          "it signs @" + user.slug + " out everywhere")
+
+
+def cmd_avatar_remove(session: Session, args) -> None:
+    user = _account(session, args.account)
+    removed, user.avatar_path = user.avatar_path, None
+    session.commit()
+    print(f"@{user.slug}: removed {removed}" if removed else f"@{user.slug} had no photo")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="beeplay-ops", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -291,7 +337,7 @@ def build_parser() -> argparse.ArgumentParser:
     importing = commands.add_parser("import")
     importing.add_argument("source", nargs="?", help="game folder or zip")
     importing.add_argument("--from-failed", type=int, metavar="ID")
-    importing.add_argument("--owner", help="slug, e.g. bee-3 or beeplay")
+    importing.add_argument("--owner", help="handle, e.g. beeplay")
     importing.add_argument("--title")
     importing.add_argument("--category")
     importing.add_argument("--emoji")
@@ -322,6 +368,13 @@ def build_parser() -> argparse.ArgumentParser:
                           help="do nothing if the last check is more recent than this")
     checking.add_argument("--no-mark", action="store_true", help="don't record this as a check")
     checking.set_defaults(run=cmd_ux)
+
+    for name, run in (
+        ("user", cmd_user), ("reset-password", cmd_reset_password), ("avatar-remove", cmd_avatar_remove),
+    ):
+        sub = commands.add_parser(name)
+        sub.add_argument("account", help="handle, or u<id> as the ux check prints it")
+        sub.set_defaults(run=run)
 
     commands.add_parser("refresh-reporter").set_defaults(run=cmd_refresh_reporter)
     commands.add_parser("migrate").set_defaults(run=cmd_migrate)

@@ -26,6 +26,14 @@ beeplay.top {
 		file_server
 	}
 
+	handle_path /avatars/* {
+		root * /var/lib/beeplay/avatars
+		# Named by a hash of their contents: a new photo is a new URL.
+		header Cache-Control "public, max-age=31536000, immutable"
+		header X-Content-Type-Options "nosniff"
+		file_server
+	}
+
 	handle {
 		reverse_proxy 127.0.0.1:8000
 	}

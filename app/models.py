@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import ForeignKey, Text, UniqueConstraint, true
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import ForeignKey, Text, UniqueConstraint, false, true
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 # live: in the public feed. hidden: pulled by an operator or auto-hidden for
 # crashing; the owner still sees it. unlisted: test games, reachable by link.
@@ -19,49 +19,74 @@ class Base(DeclarativeBase):
 
 
 class User(Base):
-    """A pre-seeded identity a hackathon tester can claim.
+    """A person's account, created silently the first time they need one.
 
-    There is no authentication: a tester picks an identity from /claim and the
-    server hands back a cookie. Claims are exclusive but self-releasing, which
-    is what `last_seen_at` is for -- see `repository.is_claimed`.
+    Nobody signs up: the first like, save, creation or visit to /profile makes
+    an account with an automatic name and handle and a session cookie for this
+    device. Setting a password (which locks the handle) is what lets the same
+    person log in on another device.
     """
 
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
-    # Stable handle used in URLs and in the cookie ("bee-3"), so a printed QR
-    # code survives a reseed that renumbers the primary keys.
+    # The @handle, lowercase a-z 0-9 _, used in /u/<slug> and in login.
+    # Automatic ("bee482193") until the owner picks one, which they can do
+    # exactly once; see handle_locked.
     slug: Mapped[str] = mapped_column(unique=True, index=True)
+    handle_locked: Mapped[bool] = mapped_column(default=False, server_default=false())
 
     name: Mapped[str]
-    handle: Mapped[str]
-    bio: Mapped[str]
+    bio: Mapped[str] = mapped_column(default="", server_default="")
 
     # Hex without the leading '#'. The one inline avatar SVG is recolored per
-    # user rather than shipping eight images.
+    # user; avatar_path, when set, is an uploaded photo and wins.
     avatar_fill: Mapped[str]
+    # File name under AVATARS_DIR, e.g. "3f2a9c0d1e2b4a5c.webp".
+    avatar_path: Mapped[str | None] = mapped_column(default=None)
 
-    # Progression remains a prototype fixture for now. Social counts are not
-    # stored here: they are derived from the interaction tables below.
-    level: Mapped[int]
-    xp: Mapped[int]
-    xp_goal: Mapped[int]
+    # Progression is still a prototype placeholder: every account shows
+    # these defaults and nothing earns XP yet.
+    level: Mapped[int] = mapped_column(default=1, server_default="1")
+    xp: Mapped[int] = mapped_column(default=0, server_default="0")
+    xp_goal: Mapped[int] = mapped_column(default=1000, server_default="1000")
 
-    # Ordering of the claim grid, same role as Work.position.
-    position: Mapped[int]
+    # argon2. Null until the owner sets one; without it the account lives
+    # only in this device's session cookie.
+    password_hash: Mapped[str | None] = mapped_column(default=None)
 
-    # Regenerated on every claim. It lets a returning cookie prove it is the
-    # same tester rather than someone who took the identity after it expired.
-    claim_token: Mapped[str | None] = mapped_column(default=None)
+    # A staff-issued one-time reset link (beeplay-ops reset-password): the
+    # sha256 of the token and when it stops working.
+    reset_token_hash: Mapped[str | None] = mapped_column(default=None, index=True)
+    reset_expires_at: Mapped[datetime | None] = mapped_column(default=None)
 
-    # Naive UTC. Null means never claimed; otherwise the claim is live until
-    # CLAIM_TTL after this moment, so expiry is a comparison and not a job.
-    last_seen_at: Mapped[datetime | None] = mapped_column(default=None)
+    # Set once the "pick a name" prompt after a first publish was shown, so
+    # it is asked exactly once whatever the answer.
+    profile_prompted: Mapped[bool] = mapped_column(default=False, server_default=false())
 
-    # False for the house account that owns the team's own games: it never
-    # appears in the claim grid and cannot be claimed.
-    claimable: Mapped[bool] = mapped_column(default=True, server_default=true())
+    # False only for the house account that owns the team's own games: it
+    # never gets a session and cannot be logged into.
+    loginable: Mapped[bool] = mapped_column(default=True, server_default=true())
+
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+    @property
+    def handle(self) -> str:
+        return "@" + self.slug
+
+
+class UserSession(Base):
+    """One device's login. The cookie holds the token; only its hash is kept."""
+
+    __tablename__ = "user_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(unique=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    # Refreshed at most every TOUCH_INTERVAL, so reads stay reads.
+    last_seen_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
 class Work(Base):
@@ -88,10 +113,12 @@ class Work(Base):
     # disk and the swap is recorded in work_events.
     artifact_hash: Mapped[str | None] = mapped_column(default=None, index=True)
 
-    # The claimed identity that uploaded it, or the house account.
+    # The account that uploaded it, or the house account. `author` above is
+    # the name at publish time, kept for history; pages show owner.name.
     user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), default=None, index=True
     )
+    owner: Mapped[User | None] = relationship(lazy="selectin")
 
     # One of STATUSES. The source of truth for what is shown; the games
     # directory is never consulted.
@@ -163,7 +190,7 @@ class WorkEvent(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     work_id: Mapped[int] = mapped_column(ForeignKey("works.id"), index=True)
-    # "user:<slug>", "ops:<unix user>" or "system".
+    # "user:<id>" (older rows: "user:<slug>"), "ops:<unix user>" or "system".
     actor: Mapped[str]
     # created | artifact_replaced | status_changed | metadata_changed
     kind: Mapped[str]
@@ -219,7 +246,6 @@ class Generation(Base):
     __tablename__ = "generations"
     id: Mapped[str] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    claim_hash: Mapped[str]
     prompt: Mapped[str] = mapped_column(Text)
     model: Mapped[str]
     status: Mapped[str] = mapped_column(default="queued", index=True)

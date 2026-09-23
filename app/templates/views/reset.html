@@ -1,0 +1,16 @@
+      <section class="view active" id="resetView" data-view="reset">
+        <div class="account-page">
+          {% if reset_user %}
+          <h1>重新设置密码</h1>
+          <p>为 <strong>{{ reset_user.handle }}</strong> 设置一个新密码。之后所有设备都需要重新登录。</p>
+          <form class="account-form" data-account-form="reset" data-token="{{ token }}" data-next="/profile">
+            <label>新密码<input name="password" type="password" autocomplete="new-password" minlength="6" required /></label>
+            <p class="account-error" role="alert"></p>
+            <button class="primary-button" type="submit">保存并登录</button>
+          </form>
+          {% else %}
+          <h1>链接已失效</h1>
+          <p>这个重置链接已经用过或过期了。请再找黑客松工作人员要一个。</p>
+          {% endif %}
+        </div>
+      </section>

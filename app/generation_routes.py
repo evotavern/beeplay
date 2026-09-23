@@ -4,39 +4,53 @@ import uuid
 from dataclasses import asdict
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app import config, generation, ingest
+from app import accounts, config, generation, ingest
 from app.db import get_session
 from app.generation import ACTIVE, PLAYABLE, PUBLISHED, READY
-from app.identity import current_identity
-from app.models import Generation, GenerationEvent, utcnow
+from app.identity import current_user, ensure_user
+from app.models import Generation, GenerationEvent, User, utcnow
 
 router = APIRouter(prefix="/api/generations")
 
 MAX_EVENTS_PER_JOB = 200
 
 
-def creator(request: Request, identity=Depends(current_identity)):
-    user, _ = identity
-    if user is None:
-        raise HTTPException(401, "先认领一个身份，再开始创作吧")
+def check_write(request: Request) -> None:
     if request.method != "GET":
         origin = request.headers.get("origin")
         if origin and origin != str(request.base_url).rstrip("/"):
             raise HTTPException(403, "Invalid origin")
         if request.headers.get("content-type", "").split(";")[0] != "application/json":
             raise HTTPException(415, "JSON required")
+
+
+def creator(request: Request, user: User | None = Depends(current_user), _=Depends(check_write)):
+    """A job belongs to an account; without one there is no job to touch."""
+    if user is None:
+        raise HTTPException(404, "找不到这个创作")
     return user
+
+
+def new_creator(
+    request: Request,
+    response: Response,
+    session: Session = Depends(get_session),
+    _user: User | None = Depends(current_user),
+    _=Depends(check_write),
+):
+    """Starting a generation is one of the things that makes an account."""
+    return ensure_user(request, response, session)
 
 
 def owned(session, job_id, user):
     job = session.get(Generation, job_id)
-    if job is None or job.user_id != user.id or job.claim_hash != generation.fingerprint(user.claim_token or ""):
+    if job is None or job.user_id != user.id:
         raise HTTPException(404, "找不到这个创作")
     return job
 
@@ -68,14 +82,14 @@ class Signal(BaseModel):
 
 
 @router.get("/current")
-def current_generation(user=Depends(creator), session: Session = Depends(get_session)):
-    job = session.scalar(select(Generation).where(Generation.user_id == user.id,
-        Generation.claim_hash == generation.fingerprint(user.claim_token or "")).order_by(Generation.created_at.desc()))
+def current_generation(user: User | None = Depends(current_user), session: Session = Depends(get_session)):
+    job = user and session.scalar(select(Generation).where(Generation.user_id == user.id)
+        .order_by(Generation.created_at.desc()))
     return {"configured": bool(config.EVOMAP_KEYS), "job": job_payload(job) if job else None}
 
 
 @router.post("", status_code=202)
-def start_generation(body: Start, user=Depends(creator), session: Session = Depends(get_session)):
+def start_generation(body: Start, user=Depends(new_creator), session: Session = Depends(get_session)):
     if not body.prompt.strip():
         raise HTTPException(422, "先写下一句想法吧")
     with generation.LOCK:
@@ -85,9 +99,8 @@ def start_generation(body: Start, user=Depends(creator), session: Session = Depe
         if not config.EVOMAP_KEYS:
             raise HTTPException(503, "生成服务尚未配置，请联系管理员添加 API key")
         if session.scalar(select(Generation.id).where(Generation.user_id == user.id, Generation.status.in_(ACTIVE))):
-            raise HTTPException(409, "这个身份已有一个游戏正在生成")
+            raise HTTPException(409, "你已经有一个游戏正在生成")
         job = Generation(id=str(body.request_id), user_id=user.id,
-            claim_hash=generation.fingerprint(user.claim_token or ""),
             prompt=body.prompt.strip(), model=config.EVOMAP_MODEL)
         session.add(job)
         session.flush()
@@ -165,9 +178,9 @@ def publish(job_id: str, body: Details, user=Depends(creator), session: Session 
         except ingest.DetailsError as error:
             raise HTTPException(422, str(error)) from error
         work = ingest.publish(session, owner=user, details=info,
-            entries=[("index.html", job.html.encode())], actor=f"user:{user.slug}", commit=False)
+            entries=[("index.html", job.html.encode())], actor=f"user:{user.id}", commit=False)
         job.work_id, job.status, job.details = work.id, PUBLISHED, json.dumps(asdict(info))
         generation.emit(session, job, "published", generation.elapsed(job))
         session.commit()
     ingest.announce(work, user)
-    return {"work_id": work.id}
+    return {"work_id": work.id, "ask_profile": accounts.take_profile_prompt(session, user)}

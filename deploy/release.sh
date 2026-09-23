@@ -25,7 +25,7 @@ if [ ! -f /etc/beeplay/beeplay.env ]; then
   install -m 640 -g beeplay "$SRC/deploy/beeplay.env" /etc/beeplay/beeplay.env
   echo "installed /etc/beeplay/beeplay.env"
 fi
-install -d -o beeplay -g beeplay "$STATE" "$STATE/games" "$STATE/failed" "$STATE/logs"
+install -d -o beeplay -g beeplay "$STATE" "$STATE/games" "$STATE/failed" "$STATE/logs" "$STATE/avatars"
 
 echo "== backup =="
 install -d -m 700 "$BACKUPS"
@@ -40,7 +40,7 @@ rm -rf "$PREV"
 cp -a "$APP" "$PREV"
 rsync -a --delete \
   --exclude '.git' --exclude '.venv' --exclude '.cache' --exclude '.local' --exclude '.env' \
-  --exclude 'beeplay.db*' --exclude 'games' --exclude 'failed' --exclude 'logs' \
+  --exclude 'beeplay.db*' --exclude 'games' --exclude 'failed' --exclude 'logs' --exclude 'avatars' \
   "$SRC/" "$APP/"
 chown -R beeplay:beeplay "$APP"
 chmod -R a+rX "$APP/assets"
