@@ -6,11 +6,30 @@
   var toastTimer;
   var feedWheelLocked = false;
 
-  function showToast(message) {
+  function showToast(message, link) {
     toast.textContent = message;
+    if (link) {
+      var anchor = document.createElement("a");
+      anchor.href = link.href;
+      anchor.textContent = link.text;
+      toast.appendChild(anchor);
+    }
     toast.classList.add("show");
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { toast.classList.remove("show"); }, 2200);
+    // A toast with a link stays up long enough to be tapped.
+    toastTimer = setTimeout(function () { toast.classList.remove("show"); }, link ? 4000 : 2200);
+  }
+
+  // Every way in through the create modal needs a claimed identity, so an
+  // unclaimed visitor is stopped at the button instead of after filling in
+  // (and uploading) a whole game. The claim brings them back with the modal open.
+  function promptClaim() {
+    var back = new URL(window.location.href);
+    back.searchParams.set("create", "1");
+    showToast("先选择一个身份，才能开始创作", {
+      href: "/claim?next=" + encodeURIComponent(back.pathname + back.search),
+      text: "去选择身份 →"
+    });
   }
 
   // The swapped-in section is the only .view in the DOM, so it *is* the state.
@@ -285,8 +304,10 @@
       return;
     }
 
-    if (target.closest("[data-action='create']")) {
-      openCreateModal();
+    var createButton = target.closest("[data-action='create']");
+    if (createButton) {
+      if (createButton.getAttribute("aria-disabled") === "true") promptClaim();
+      else openCreateModal();
       return;
     }
 
@@ -698,6 +719,17 @@
     if (event.key === "Escape" && gamePlaying()) pauseGame();
   });
 
+  // Back from /claim?next=…?create=1: finish what the visitor was starting.
+  function resumeCreate() {
+    var here = new URL(window.location.href);
+    if (here.searchParams.get("create") !== "1") return;
+    here.searchParams.delete("create");
+    history.replaceState(history.state, "", here.pathname + here.search + here.hash);
+    var createButton = document.querySelector("[data-action='create']");
+    if (createButton && createButton.getAttribute("aria-disabled") !== "true") openCreateModal();
+  }
+
   syncChrome();
   scrollToSharedGame();
+  resumeCreate();
 })();

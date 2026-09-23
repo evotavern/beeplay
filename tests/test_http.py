@@ -3,6 +3,7 @@
 import io
 import json
 import os
+import re
 import tempfile
 import unittest
 import zipfile
@@ -257,6 +258,51 @@ class HttpTests(HttpTestCase):
         [failure] = self.logged("health_fail")
         self.assertEqual(failure["browser"], "wechat")
         self.assertEqual(failure["ua"], WECHAT)
+
+
+class ClaimBeforeCreateTests(HttpTestCase):
+    """Creating needs an identity, so the page says so before any work is done."""
+
+    def claim_with_next(self, slug: str, target: str, client: TestClient | None = None):
+        client = client or self.client
+        client.get("/claim")
+        token = client.cookies.get(main.CSRF_COOKIE_NAME)
+        return client.post(
+            f"/claim/{slug}", params={"csrf_token": token, "next": target}, follow_redirects=False
+        )
+
+    def test_create_buttons_are_disabled_until_an_identity_is_claimed(self) -> None:
+        disabled = re.compile(r'<button [^>]*data-action="create"[^>]*aria-disabled="true"')
+        self.assertEqual(len(disabled.findall(self.client.get("/").text)), 2)
+        self.claim()
+        self.assertEqual(disabled.findall(self.client.get("/").text), [])
+
+    def test_the_picker_carries_where_to_return_into_each_claim(self) -> None:
+        page = self.client.get("/claim", params={"next": "/discover?create=1"}).text
+        self.assertIn("&amp;next=/discover%3Fcreate%3D1", page)
+
+    def test_a_claim_returns_to_the_page_it_was_started_from(self) -> None:
+        response = self.claim_with_next("bee-2", "/discover?create=1")
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/discover?create=1")
+
+    def test_a_claim_never_returns_to_another_site(self) -> None:
+        for target in ["https://evil.example/", "//evil.example/", "/\\evil.example/", "/\t/evil.example/", "evil"]:
+            with self.subTest(target=target):
+                response = self.claim_with_next("bee-2", target)
+                self.assertEqual(response.headers["location"], "/")
+
+    def test_a_lost_race_keeps_the_way_back(self) -> None:
+        self.claim("bee-2")
+        other = TestClient(main.app, base_url="http://testserver")
+        response = self.claim_with_next("bee-2", "/?create=1", client=other)
+        self.assertEqual(response.headers["location"], "/claim?notice=taken&next=/%3Fcreate%3D1")
+
+    def test_the_create_click_explains_instead_of_opening_the_modal(self) -> None:
+        script = (Path(__file__).parents[1] / "assets" / "js" / "app.js").read_text()
+        self.assertIn('if (createButton.getAttribute("aria-disabled") === "true") promptClaim();', script)
+        self.assertIn('"/claim?next=" + encodeURIComponent(back.pathname + back.search)', script)
+        self.assertIn("resumeCreate();", script)
 
 
 if __name__ == "__main__":

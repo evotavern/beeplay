@@ -6,8 +6,9 @@ from contextlib import asynccontextmanager
 from math import ceil
 from pathlib import Path
 from typing import Literal
+from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -84,6 +85,20 @@ async def lifespan(app: FastAPI):
 def claims_are_secure(request: Request) -> bool:
     """Whether this request may issue or use a bearer claim cookie."""
     return request.url.scheme == "https" or ALLOW_INSECURE_CLAIMS
+
+
+def local_path(target: str) -> str:
+    """Where to land after a claim: a path on this site, never another host.
+
+    "//host" and "/\\host" are protocol-relative in browsers, so a bare
+    leading slash is not enough to stay on this origin. Browsers also drop
+    tabs and newlines from URLs, which would turn "/\\t/host" into "//host".
+    """
+    if any(char <= " " for char in target):
+        return "/"
+    if target.startswith("/") and not target.startswith(("//", "/\\")):
+        return target
+    return "/"
 
 
 def csrf_token(request: Request) -> tuple[str, bool]:
@@ -251,6 +266,7 @@ def messages(request: Request) -> HTMLResponse:
 def claim_grid(
     request: Request,
     notice: str | None = None,
+    next_url: str = Query("/", alias="next"),
     session: Session = Depends(get_session),
     identity: tuple[User | None, str] = Depends(current_identity),
 ) -> HTMLResponse:
@@ -272,6 +288,7 @@ def claim_grid(
             "claims_enabled": claims_are_secure(request),
             "csrf_token": token,
             "notice": notice,
+            "next_url": local_path(next_url),
             "identities": [
                 {
                     "user": candidate,
@@ -302,6 +319,7 @@ def claim_identity(
     slug: str,
     request: Request,
     csrf_token: str = "",
+    next_url: str = Query("/", alias="next"),
     session: Session = Depends(get_session),
     identity: tuple[User | None, str] = Depends(current_identity),
 ) -> Response:
@@ -313,10 +331,11 @@ def claim_identity(
 
     holder, _ = identity
     token = claim(session, slug, holder)
+    target = local_path(next_url)
     if token is None:
-        return redirect(request, "/claim?notice=taken")
+        return redirect(request, "/claim?notice=taken&next=" + quote(target, safe="/"))
 
-    response = redirect(request, "/")
+    response = redirect(request, target)
     response.set_cookie(
         COOKIE_NAME,
         cookie_value(slug, token),

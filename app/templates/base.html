@@ -671,6 +671,14 @@
     #gameStop { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 14px); right: 14px; z-index: 1; width: 40px; height: 40px; border: 0; border-radius: 50%; background: rgba(23,27,26,0.62); color: var(--white); font-size: 20px; line-height: 1; }
     .toast { position: fixed; z-index: 80; left: 50%; bottom: 104px; transform: translate(-50%, 16px); padding: 12px 16px; color: var(--white); background: var(--ink); border-radius: 999px; font-size: 13px; font-weight: 800; opacity: 0; pointer-events: none; transition: opacity 180ms ease, transform 180ms ease; }
     .toast.show { opacity: 1; transform: translate(-50%, 0); }
+    /* left: 50% would otherwise cap the width at half the screen and wrap longer toasts. */
+    .toast { width: max-content; max-width: calc(100vw - 32px); }
+    /* The toast ignores the pointer so it never blocks the feed; only its link takes taps. */
+    .toast a { margin-left: 8px; color: var(--lime); }
+    .toast.show a { pointer-events: auto; }
+    /* Unclaimed visitors: still clickable, so the click can explain why. */
+    [data-action="create"][aria-disabled="true"] { opacity: 0.45; box-shadow: none; }
+    [data-action="create"][aria-disabled="true"]:hover { transform: none; box-shadow: none; }
 
     @media (min-width: 981px) {
       .bottom-nav { display: none; }
@@ -1163,7 +1171,7 @@
         <button class="nav-link{% if view == 'messages' %} active{% endif %}" data-view-target="messages" hx-get="/messages">消息</button>
         <button class="nav-link{% if view == 'profile' %} active{% endif %}" data-view-target="profile" hx-get="/profile">个人</button>
       </nav>
-      <button class="desktop-create" data-action="create" aria-label="开始创建"><span>+</span><span>开始创建</span></button>
+      <button class="desktop-create" data-action="create" aria-label="开始创建"{% if not current_user %} aria-disabled="true"{% endif %}><span>+</span><span>开始创建</span></button>
       <div class="topbar-actions">
         <button class="credit-pill" id="creditPill" aria-label="查看蜂蜜积分"><span class="credit-dot">✦</span><span>1,000</span></button>
         <button class="icon-button" id="notificationButton" data-view-target="messages" hx-get="/messages" aria-label="查看消息">
@@ -1201,7 +1209,7 @@
       <button class="nav-item{% if view == 'discover' %} active{% endif %}" data-view-target="discover" hx-get="/discover" aria-label="探索">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m15.4 8.6-2.1 4.7-4.7 2.1 2.1-4.7 4.7-2.1Z"/></svg>
       </button>
-      <button class="floating-create" data-action="create" aria-label="开始创作">+</button>
+      <button class="floating-create" data-action="create" aria-label="开始创作"{% if not current_user %} aria-disabled="true"{% endif %}>+</button>
       <button class="nav-item{% if view == 'messages' %} active{% endif %}" data-view-target="messages" hx-get="/messages" aria-label="消息"><span style="font-size: 22px;">♧</span><span class="dot" aria-hidden="true"></span></button>
       <button class="nav-item{% if view == 'profile' %} active{% endif %}" data-view-target="profile" hx-get="/profile" aria-label="个人"><span style="font-size: 22px;">●</span></button>
     </div>
