@@ -33,7 +33,7 @@ class OpsTests(unittest.TestCase):
         with Session(self.engine) as session:
             session.add(User(
                 slug="bee-2", name="小蜜蜂", handle="@b", bio="", avatar_fill="fff",
-                saved_count=0, level=1, xp=0, xp_goal=1, position=0,
+                level=1, xp=0, xp_goal=1, position=0,
             ))
             session.commit()
         self.game = self.root / "fixed-game"
@@ -125,7 +125,7 @@ class OpsTests(unittest.TestCase):
         with self.session() as session:
             session.add(Work(
                 title="Coffee", author="MOOD CAFÉ", category="relax", emoji="☕", art="art-one",
-                views="0", likes="0", collection="feed", artifact_hash="af359667cf6a8038",
+                collection="feed", artifact_hash="af359667cf6a8038",
             ))
             session.commit()
 

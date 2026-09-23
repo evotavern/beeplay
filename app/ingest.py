@@ -73,8 +73,6 @@ def publish(
         emoji=details.emoji,
         art=details.art,
         description=details.description,
-        views="0",
-        likes="0",
         collection="feed",
         artifact_hash=artifact,
         user_id=owner.id,

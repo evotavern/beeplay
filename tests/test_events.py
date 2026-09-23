@@ -33,13 +33,13 @@ class RecordTests(unittest.TestCase):
         with Session(engine) as session, tempfile.TemporaryDirectory() as directory:
             owner = User(
                 slug="bee-2", name="小蜜蜂", handle="@b", bio="", avatar_fill="fff",
-                saved_count=0, level=1, xp=0, xp_goal=1, position=0,
+                level=1, xp=0, xp_goal=1, position=0,
             )
             session.add(owner)
             session.flush()
             work = Work(
                 title="G", author="小蜜蜂", category="meme", emoji="🎮", art="art-one",
-                views="0", likes="0", collection="feed", artifact_hash="abc", user_id=owner.id,
+                collection="feed", artifact_hash="abc", user_id=owner.id,
             )
             session.add(work)
             session.flush()

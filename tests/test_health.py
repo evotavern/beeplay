@@ -29,13 +29,13 @@ class HealthTests(unittest.TestCase):
             active.start()
         user = User(
             slug="bee-2", name="小蜜蜂", handle="@b", bio="", avatar_fill="fff",
-            saved_count=0, level=1, xp=0, xp_goal=1, position=0,
+            level=1, xp=0, xp_goal=1, position=0,
         )
         self.session.add(user)
         self.session.flush()
         self.work = Work(
-            title="G", author="小蜜蜂", category="c", emoji="🎮", art="art-one", views="0",
-            likes="0", collection="feed", artifact_hash="current", user_id=user.id,
+            title="G", author="小蜜蜂", category="c", emoji="🎮", art="art-one",
+            collection="feed", artifact_hash="current", user_id=user.id,
         )
         self.session.add(self.work)
         self.session.commit()

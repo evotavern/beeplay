@@ -36,7 +36,7 @@ class ImportEndpointTests(unittest.TestCase):
         self.session = Session(self.engine)
         self.user = User(
             slug="bee-2", name="小蜜蜂", handle="@b", bio="", avatar_fill="fff",
-            saved_count=0, level=1, xp=0, xp_goal=1, position=0,
+            level=1, xp=0, xp_goal=1, position=0,
         )
         self.session.add(self.user)
         self.session.commit()

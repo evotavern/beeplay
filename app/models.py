@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import ForeignKey, Text, true
+from sqlalchemy import ForeignKey, Text, UniqueConstraint, true
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # live: in the public feed. hidden: pulled by an operator or auto-hidden for
@@ -42,10 +42,8 @@ class User(Base):
     # user rather than shipping eight images.
     avatar_fill: Mapped[str]
 
-    # Profile card numbers with no system behind them yet. The works count is
-    # derived from the works table; these three stay fixtures so that two
-    # testers side by side still see different cards.
-    saved_count: Mapped[int]
+    # Progression remains a prototype fixture for now. Social counts are not
+    # stored here: they are derived from the interaction tables below.
     level: Mapped[int]
     xp: Mapped[int]
     xp_goal: Mapped[int]
@@ -78,12 +76,6 @@ class Work(Base):
     emoji: Mapped[str]
     art: Mapped[str]
 
-    # Display strings ("4.9K"), exactly as the prototype showed them. These
-    # become counts derived from an interaction events table once the
-    # interactions are real rather than fixtures.
-    views: Mapped[str]
-    likes: Mapped[str]
-
     # Every real game is "feed"; the fake discover/profile rows were deleted
     # by migration 0003.
     collection: Mapped[str] = mapped_column(index=True)
@@ -107,6 +99,61 @@ class Work(Base):
 
     description: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class WorkLike(Base):
+    """A user's current like state for a work."""
+
+    __tablename__ = "work_likes"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    work_id: Mapped[int] = mapped_column(
+        ForeignKey("works.id"), primary_key=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class WorkSave(Base):
+    """A work in a user's private saved collection."""
+
+    __tablename__ = "work_saves"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    work_id: Mapped[int] = mapped_column(
+        ForeignKey("works.id"), primary_key=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class WorkView(Base):
+    """One newly mounted play session; pause/resume keeps the same session."""
+
+    __tablename__ = "work_views"
+    __table_args__ = (UniqueConstraint("work_id", "session_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    work_id: Mapped[int] = mapped_column(ForeignKey("works.id"), index=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), default=None, index=True
+    )
+    # Minted by the host for a newly mounted game. Retries are idempotent.
+    session_id: Mapped[str] = mapped_column(index=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)
+
+
+class WorkShare(Base):
+    """A completed native share or successful clipboard fallback."""
+
+    __tablename__ = "work_shares"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    work_id: Mapped[int] = mapped_column(ForeignKey("works.id"), index=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), default=None, index=True
+    )
+    # Client idempotency key: a retry must not inflate the aggregate.
+    event_id: Mapped[str] = mapped_column(unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)
 
 
 class WorkEvent(Base):

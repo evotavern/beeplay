@@ -16,8 +16,6 @@ def game(title: str, minute: int, status: str = "live", collection: str = "feed"
         category="relax",
         emoji="🎮",
         art="art-one",
-        views="0",
-        likes="0",
         collection=collection,
         status=status,
         created_at=datetime(2026, 9, 23, 12, minute),

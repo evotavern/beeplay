@@ -66,6 +66,11 @@ class GenerationTests(unittest.TestCase):
         second = self.client.post(f"/api/generations/{id}/publish", json=DETAILS)
         self.assertEqual(first.json(), second.json())
         self.assertIn("Honey Hop", self.client.get("/").text)
+        work_id = first.json()["work_id"]
+        self.assertEqual(self.client.post(f"/api/works/{work_id}/like", json={"active": True}).json(), {"active": True, "count": 1})
+        self.assertEqual(self.client.post(f"/api/works/{work_id}/save", json={"active": True}).status_code, 200)
+        self.assertIn("Honey Hop", self.client.get("/discover").text)
+        self.assertIn("Honey Hop", self.client.get("/profile?tab=saved").text)
         with db.SessionLocal() as session:
             self.assertEqual(len(session.scalars(select(Work).where(Work.title == "Honey Hop")).all()), 1)
             attempt = session.scalar(select(GenerationAttempt))
