@@ -1,4 +1,6 @@
+import hashlib
 import os
+from functools import lru_cache
 import secrets
 from contextlib import asynccontextmanager
 from math import ceil
@@ -99,11 +101,24 @@ app.mount("/assets", StaticFiles(directory=BASE_DIR / "assets"), name="assets")
 # disk, so game files never go through uvicorn's threadpool.
 app.mount("/games", StaticFiles(directory=GAMES_DIR), name="games")
 
+@lru_cache
+def asset(path: str) -> str:
+    """URL for a file under assets/, versioned by its contents.
+
+    Nginx lets browsers cache /assets/ for a week, so an unversioned URL keeps
+    returning visitors on the previous release's JavaScript after a deploy.
+    Hashed once per process, i.e. once per release.
+    """
+    digest = hashlib.sha256((BASE_DIR / "assets" / path).read_bytes()).hexdigest()[:12]
+    return f"/assets/{path}?v={digest}"
+
+
 templates = Jinja2Templates(directory=BASE_DIR / "app" / "templates")
 # Preserve the template's trailing newline; Starlette 1.6 no longer
 # forwards env options through the Jinja2Templates constructor.
 templates.env.keep_trailing_newline = True
 templates.env.globals["avatar"] = avatar
+templates.env.globals["asset"] = asset
 templates.env.globals["load_timeout_s"] = config.LOAD_TIMEOUT_S
 
 

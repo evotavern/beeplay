@@ -1150,7 +1150,7 @@
     <header class="topbar">
       <button class="brand" data-view-target="home" hx-get="/" aria-label="回到首页">
         <span class="brand-mark" aria-hidden="true">
-          <img src="assets/icons/beeplay-logo.png" alt="" />
+          <img src="{{ asset('icons/beeplay-logo.png') }}" alt="" />
         </span>
         <span class="brand-copy"><strong>beeplay</strong><span>蜂玩 · make it playful</span></span>
       </button>
@@ -1251,7 +1251,7 @@
 
   <div class="toast" id="toast" role="status"></div>
 
-  <script src="/assets/vendor/htmx.min.js"></script>
-  <script src="/assets/js/app.js"></script>
+  <script src="{{ asset('vendor/htmx.min.js') }}"></script>
+  <script src="{{ asset('js/app.js') }}"></script>
 </body>
 </html>
