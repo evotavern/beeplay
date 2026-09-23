@@ -1,3 +1,5 @@
 {% from "macros.html" import work_card %}
 {% for work in works %}{{ work_card(work, searchable=True) }}
+{% else %}
+<div class="empty-state"><div><div style="font-size: 56px;">🐝</div><h3>发现页正在酿蜜中</h3><p>新游戏都在首页游戏流里，先去刷一刷吧。</p></div></div>
 {% endfor %}

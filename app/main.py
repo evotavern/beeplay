@@ -148,7 +148,7 @@ def profile_context(session: Session, user: User, tab: str) -> dict:
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request, session: Session = Depends(get_session)) -> HTMLResponse:
-    return render_view(request, "home", games=feed_games(session, GAMES_DIR))
+    return render_view(request, "home", games=feed_games(session))
 
 
 @app.get("/discover", response_class=HTMLResponse)

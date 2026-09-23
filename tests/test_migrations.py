@@ -54,14 +54,21 @@ class MigrationTests(unittest.TestCase):
                     " 'art-one', '0', '0', 'feed', 0, 'af359667cf6a8038')"
                 )
             )
+            connection.execute(
+                text(
+                    "INSERT INTO works VALUES (1, 'Jungle Escape', 'Mia', 'relax', '🌿',"
+                    " 'art-one', '4.9K', '1.2K', 'discover', 0, NULL)"
+                )
+            )
 
         migrate(self.engine)
 
         self.assertEqual(self.revision(), HEAD_REVISION)
         self.assert_matches_models()
         with self.engine.connect() as connection:
-            hashes = connection.execute(text("SELECT artifact_hash FROM works")).scalars().all()
-        self.assertEqual(hashes, ["af359667cf6a8038"])
+            rows = connection.execute(text("SELECT artifact_hash, status FROM works")).all()
+        # The fake discover card is gone; the real game is live.
+        self.assertEqual(rows, [("af359667cf6a8038", "live")])
 
     def test_claiming_era_database_without_alembic_is_adopted(self) -> None:
         # Databases from the claiming branch have users but no alembic_version.

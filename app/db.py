@@ -7,7 +7,7 @@ from alembic.config import Config
 from sqlalchemy import create_engine, event, func, inspect, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.data import FEED_GAMES, USERS, WORKS
+from app.data import FEED_GAMES, HOUSE_USER, USERS
 from app.models import User, Work
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -47,7 +47,7 @@ def get_session() -> Iterator[Session]:
 
 
 MIGRATIONS_DIR = BASE_DIR / "migrations"
-HEAD_REVISION = "0002"
+HEAD_REVISION = "0003"
 
 
 def _stamp_unversioned(connection) -> str | None:
@@ -82,73 +82,28 @@ def migrate(target_engine=None, target: str = "head") -> None:
         connection.exec_driver_sql("PRAGMA foreign_keys=ON")
 
 
-def _adopt_orphan_profile_works(session: Session, user: User) -> bool:
-    """Give the prototype's ownerless profile works to the first identity.
-
-    The deployed database already holds three profile works from before
-    ownership existed. Adopting them is what keeps the first persona from
-    ending up with both those rows and a fresh copy of the same fixtures.
-    Returns whether anything was adopted; on a fresh database, nothing is.
-    """
-    adopted = session.execute(
-        update(Work)
-        .where(Work.collection == "profile", Work.user_id.is_(None))
-        .values(user_id=user.id, author=user.name)
-    )
-    return adopted.rowcount > 0
-
-
 def _seed_users(session: Session) -> None:
-    """Insert any identity that is missing, keyed on slug.
-
-    Guarded per user rather than on an empty table: the works table on the
-    deployed database is already full, so an "is it empty" guard would skip
-    every persona's works exactly the way the old fixture guard skipped
-    everything else.
-    """
+    """Insert any identity that is missing, keyed on slug."""
     existing = set(session.scalars(select(User.slug)))
-    first = True
     for position, fixture in enumerate(USERS):
-        if fixture["slug"] in existing:
-            first = False
-            continue
-        user = User(
-            **{key: value for key, value in fixture.items() if key != "works"},
-            position=position,
-        )
-        session.add(user)
-        session.flush()
-        if not (first and _adopt_orphan_profile_works(session, user)):
-            session.add_all(
-                [
-                    Work(
-                        collection="profile",
-                        position=index,
-                        author=user.name,
-                        user_id=user.id,
-                        **work,
-                    )
-                    for index, work in enumerate(fixture["works"])
-                ]
-            )
-        first = False
+        if fixture["slug"] not in existing:
+            session.add(User(**fixture, position=position))
+    if HOUSE_USER["slug"] not in existing:
+        session.add(User(**HOUSE_USER, position=len(USERS), claimable=False))
     session.commit()
 
 
-def _seed_works(session: Session) -> None:
-    """Seed the collections that are not owned by anyone."""
-    for collection, fixtures in (("discover", WORKS), ("feed", FEED_GAMES)):
-        if session.scalar(
-            select(func.count())
-            .select_from(Work)
-            .where(Work.collection == collection)
-        ):
-            continue
+def _seed_feed(session: Session) -> None:
+    """Give ownerless feed games to the house account; seed an empty feed."""
+    house = session.scalar(select(User).where(User.slug == HOUSE_USER["slug"]))
+    session.execute(
+        update(Work)
+        .where(Work.collection == "feed", Work.user_id.is_(None))
+        .values(user_id=house.id)
+    )
+    if not session.scalar(select(func.count()).select_from(Work)):
         session.add_all(
-            [
-                Work(collection=collection, position=position, **fixture)
-                for position, fixture in enumerate(fixtures)
-            ]
+            Work(collection="feed", user_id=house.id, **fixture) for fixture in FEED_GAMES
         )
     session.commit()
 
@@ -157,5 +112,5 @@ def init_db() -> None:
     """Migrate the schema, then seed what is missing."""
     migrate()
     with SessionLocal() as session:
-        _seed_works(session)
         _seed_users(session)
+        _seed_feed(session)

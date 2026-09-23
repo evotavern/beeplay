@@ -1,5 +1,5 @@
 import unittest
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.models import Base, User, Work
 from app.repository import (
     CLAIM_TTL,
+    all_users,
     claim,
     cookie_value,
     is_claimed,
@@ -33,7 +34,8 @@ def identity(slug: str, position: int) -> User:
     )
 
 
-def work(title: str, position: int, user: User | None) -> Work:
+def work(title: str, position: int, user: User | None, status: str = "live") -> Work:
+    # position doubles as upload order: a higher position is a newer upload.
     return Work(
         title=title,
         author=user.name if user else "nobody",
@@ -42,8 +44,10 @@ def work(title: str, position: int, user: User | None) -> Work:
         art="art-one",
         views="0",
         likes="0",
-        collection="profile",
-        position=position,
+        collection="feed",
+        position=0,
+        status=status,
+        created_at=datetime(2026, 9, 23, 12, position),
         user_id=user.id if user else None,
     )
 
@@ -66,6 +70,15 @@ class ClaimTests(unittest.TestCase):
     def test_claiming_a_free_identity_returns_a_token(self) -> None:
         self.assertIsNotNone(claim(self.session, "bee-1"))
         self.assertTrue(is_claimed(self.user("bee-1")))
+
+    def test_the_house_account_cannot_be_claimed_or_listed(self) -> None:
+        house = identity("beeplay", 2)
+        house.claimable = False
+        self.session.add(house)
+        self.session.commit()
+
+        self.assertIsNone(claim(self.session, "beeplay"))
+        self.assertNotIn("beeplay", [user.slug for user in all_users(self.session)])
 
     def test_claiming_a_taken_identity_fails(self) -> None:
         claim(self.session, "bee-1")
@@ -175,6 +188,8 @@ class ProfileWorkTests(unittest.TestCase):
                 work("Mine B", 1, self.one),
                 work("Theirs", 0, self.two),
                 work("Orphan", 2, None),
+                work("Mine, crashing", 3, self.one, status="hidden"),
+                work("Mine, deleted", 4, self.one, status="deleted"),
             ]
         )
         self.session.commit()
@@ -183,14 +198,15 @@ class ProfileWorkTests(unittest.TestCase):
         self.session.close()
         self.engine.dispose()
 
-    def test_profile_shows_only_that_users_works(self) -> None:
+    def test_profile_shows_that_users_undeleted_uploads_newest_first(self) -> None:
+        # Hidden stays visible to its owner so the crash banner can show.
         self.assertEqual(
             [w.title for w in profile_works(self.session, self.one)],
-            ["Mine A", "Mine B"],
+            ["Mine, crashing", "Mine B", "Mine A"],
         )
 
     def test_works_count_matches_what_the_grid_shows(self) -> None:
-        self.assertEqual(works_count(self.session, self.one), 2)
+        self.assertEqual(works_count(self.session, self.one), 3)
         self.assertEqual(works_count(self.session, self.two), 1)
 
 

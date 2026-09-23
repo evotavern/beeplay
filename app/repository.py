@@ -1,12 +1,11 @@
 import secrets
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from datetime import datetime, timedelta
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.data import CATEGORIES
-from app.models import User, Work
+from app.models import User, Work, utcnow
 
 # A claim survives this long past the tester's last request. It is never
 # written down as an expiry: `is_claimed` compares, so a claim that has gone
@@ -21,11 +20,6 @@ TOUCH_INTERVAL = timedelta(minutes=5)
 COOKIE_NAME = "beeplay_user"
 
 
-def utcnow() -> datetime:
-    """Naive UTC, because SQLite does not keep a timezone on what it stores."""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
 def discover_works(session: Session, category: str) -> list[Work]:
     """Works shown in discover; 'all' (or anything unknown) returns every one."""
     stmt = select(Work).where(Work.collection == "discover")
@@ -34,36 +28,36 @@ def discover_works(session: Session, category: str) -> list[Work]:
     return list(session.scalars(stmt.order_by(Work.position)))
 
 
+def _owned_by(user: User):
+    return select(Work).where(
+        Work.collection == "feed", Work.user_id == user.id, Work.status != "deleted"
+    )
+
+
 def profile_works(session: Session, user: User) -> list[Work]:
+    """The user's uploads, newest first, including hidden ones."""
     return list(
-        session.scalars(
-            select(Work)
-            .where(Work.collection == "profile", Work.user_id == user.id)
-            .order_by(Work.position)
-        )
+        session.scalars(_owned_by(user).order_by(Work.created_at.desc(), Work.id.desc()))
     )
 
 
 def works_count(session: Session, user: User) -> int:
-    return session.scalar(
-        select(func.count())
-        .select_from(Work)
-        .where(Work.collection == "profile", Work.user_id == user.id)
-    )
+    return session.scalar(select(func.count()).select_from(_owned_by(user).subquery()))
 
 
-def feed_games(session: Session, games_dir: Path) -> list[Work]:
-    """Feed records whose static artifact is available to serve."""
-    games = session.scalars(
-        select(Work)
-        .where(Work.collection == "feed", Work.artifact_hash.is_not(None))
-        .order_by(Work.position)
+def feed_games(session: Session) -> list[Work]:
+    """Live games, newest first. The status column is the only source of truth."""
+    return list(
+        session.scalars(
+            select(Work)
+            .where(
+                Work.collection == "feed",
+                Work.status == "live",
+                Work.artifact_hash.is_not(None),
+            )
+            .order_by(Work.created_at.desc(), Work.id.desc())
+        )
     )
-    return [
-        game
-        for game in games
-        if (games_dir / game.artifact_hash / "index.html").is_file()
-    ]
 
 
 def register_imported_game(
@@ -99,7 +93,10 @@ def is_claimed(user: User, now: datetime | None = None) -> bool:
 
 
 def all_users(session: Session) -> list[User]:
-    return list(session.scalars(select(User).order_by(User.position)))
+    """Every claimable identity, in grid order."""
+    return list(
+        session.scalars(select(User).where(User.claimable).order_by(User.position))
+    )
 
 
 def next_free_at(session: Session) -> datetime | None:
@@ -117,7 +114,7 @@ def claim(session: Session, slug: str, holder: User | None = None) -> str | None
     The guard lives in the UPDATE's WHERE clause rather than in a read followed
     by a write, so two testers tapping the same card at once cannot both win.
     """
-    user = session.scalar(select(User).where(User.slug == slug))
+    user = session.scalar(select(User).where(User.slug == slug, User.claimable))
     if user is None:
         return None
 

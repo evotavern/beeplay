@@ -4,23 +4,7 @@ Still hardcoded, but owned by the backend rather than the template's inline
 script. These become SQLAlchemy models once the database lands.
 """
 
-WORKS = [
-    {"title": "Jungle Escape", "author": "Mia Chen", "category": "relax", "emoji": "🌿", "art": "art-one", "views": "4.9K", "likes": "1.2K"},
-    {"title": "Color Keyboard", "author": "Scarlett", "category": "focus", "emoji": "▦", "art": "art-two", "views": "12K", "likes": "3.4K"},
-    {"title": "Bounce Lab", "author": "oxo studio", "category": "physics", "emoji": "◌", "art": "art-four", "views": "21K", "likes": "5.1K"},
-    {"title": "Swab Logic", "author": "Mia", "category": "puzzle", "emoji": "9", "art": "art-three", "views": "8.8K", "likes": "2.6K"},
-    {"title": "Tiny Weather", "author": "Bee Lab", "category": "focus", "emoji": "☁", "art": "art-four", "views": "6.3K", "likes": "1.8K"},
-    {"title": "Paper Cut Party", "author": "Skyyyyyy", "category": "relax", "emoji": "✿", "art": "art-three", "views": "2M", "likes": "26K"},
-    {"title": "Orbit Catch", "author": "sikramay2.0", "category": "physics", "emoji": "◎", "art": "art-two", "views": "65K", "likes": "8.2K"},
-    {"title": "Make 9 Become 6", "author": "Sam", "category": "puzzle", "emoji": "6", "art": "art-one", "views": "1M", "likes": "16K"},
-]
-
 # The eight identities a hackathon tester can claim at /claim, in grid order.
-# "works" are seeded into the works table as that user's profile collection.
-#
-# bee-1 is the prototype's original hardcoded profile: the three works already
-# sitting in the deployed database are backfilled to her, so nothing is
-# orphaned when ownership lands.
 USERS = [
     {
         "slug": "bee-1",
@@ -32,11 +16,6 @@ USERS = [
         "level": 1,
         "xp": 450,
         "xp_goal": 1000,
-        "works": [
-            {"title": "My Focus Island", "category": "focus", "emoji": "☀", "art": "art-one", "views": "128", "likes": "24"},
-            {"title": "A Little Bee", "category": "relax", "emoji": "🐝", "art": "art-two", "views": "86", "likes": "19"},
-            {"title": "Daily Spark", "category": "puzzle", "emoji": "✦", "art": "art-three", "views": "64", "likes": "12"},
-        ],
     },
     {
         "slug": "bee-2",
@@ -48,10 +27,6 @@ USERS = [
         "level": 2,
         "xp": 620,
         "xp_goal": 1200,
-        "works": [
-            {"title": "深夜茶馆", "category": "relax", "emoji": "🍵", "art": "art-two", "views": "212", "likes": "41"},
-            {"title": "一只猫的下午", "category": "relax", "emoji": "🐱", "art": "art-three", "views": "158", "likes": "37"},
-        ],
     },
     {
         "slug": "bee-3",
@@ -63,11 +38,6 @@ USERS = [
         "level": 3,
         "xp": 180,
         "xp_goal": 1500,
-        "works": [
-            {"title": "弹力实验室", "category": "physics", "emoji": "◌", "art": "art-four", "views": "934", "likes": "126"},
-            {"title": "重力糖果", "category": "physics", "emoji": "◎", "art": "art-one", "views": "402", "likes": "88"},
-            {"title": "斜坡与球", "category": "physics", "emoji": "▲", "art": "art-two", "views": "221", "likes": "30"},
-        ],
     },
     {
         "slug": "bee-4",
@@ -79,10 +49,6 @@ USERS = [
         "level": 1,
         "xp": 240,
         "xp_goal": 1000,
-        "works": [
-            {"title": "番茄小岛", "category": "focus", "emoji": "🍅", "art": "art-one", "views": "76", "likes": "15"},
-            {"title": "安静的雨", "category": "relax", "emoji": "☂", "art": "art-three", "views": "310", "likes": "64"},
-        ],
     },
     {
         "slug": "bee-5",
@@ -94,10 +60,6 @@ USERS = [
         "level": 2,
         "xp": 890,
         "xp_goal": 1200,
-        "works": [
-            {"title": "糖果排排站", "category": "puzzle", "emoji": "🍬", "art": "art-four", "views": "1.1K", "likes": "203"},
-            {"title": "颜色小键盘", "category": "focus", "emoji": "▦", "art": "art-two", "views": "845", "likes": "97"},
-        ],
     },
     {
         "slug": "bee-6",
@@ -109,11 +71,6 @@ USERS = [
         "level": 4,
         "xp": 60,
         "xp_goal": 2000,
-        "works": [
-            {"title": "九变成六", "category": "puzzle", "emoji": "6", "art": "art-one", "views": "2.4K", "likes": "318"},
-            {"title": "一格一格", "category": "puzzle", "emoji": "▩", "art": "art-three", "views": "620", "likes": "74"},
-            {"title": "每天一题", "category": "focus", "emoji": "✎", "art": "art-four", "views": "199", "likes": "22"},
-        ],
     },
     {
         "slug": "bee-7",
@@ -125,10 +82,6 @@ USERS = [
         "level": 2,
         "xp": 410,
         "xp_goal": 1200,
-        "works": [
-            {"title": "柚子跳跳", "category": "physics", "emoji": "🍋", "art": "art-two", "views": "533", "likes": "81"},
-            {"title": "三分钟冥想", "category": "relax", "emoji": "❁", "art": "art-one", "views": "287", "likes": "52"},
-        ],
     },
     {
         "slug": "bee-8",
@@ -140,16 +93,26 @@ USERS = [
         "level": 1,
         "xp": 700,
         "xp_goal": 1000,
-        "works": [
-            {"title": "夏天的风", "category": "relax", "emoji": "🌾", "art": "art-three", "views": "168", "likes": "39"},
-            {"title": "云朵天气", "category": "focus", "emoji": "☁", "art": "art-four", "views": "94", "likes": "18"},
-        ],
     },
 ]
 
+# Owns the team's own games. Not claimable, so never in the claim grid.
+HOUSE_USER = {
+    "slug": "beeplay",
+    "name": "蜂玩 BeePlay",
+    "handle": "@beeplay",
+    "bio": "蜂玩团队的官方作品。",
+    "avatar_fill": "c8f05a",
+    "saved_count": 0,
+    "level": 1,
+    "xp": 0,
+    "xp_goal": 1000,
+}
 
-# Playable games in the home feed. Seeded by hand while generation does not
-# exist yet; artifact_hash is the directory under the games root.
+
+# Seeded into an empty feed only, owned by the house account, so a fresh
+# checkout has one game to play. artifact_hash is the directory under the
+# games root.
 FEED_GAMES = [
     {
         "title": "今日咖啡心情",
