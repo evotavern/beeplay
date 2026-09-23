@@ -137,10 +137,10 @@ class OpsTests(unittest.TestCase):
         self.assertIn("never checked before", report)
         self.assertIn("POST /api/import-game → 422", report)
         self.assertIn("work 7: script failed to load", report)
-        self.assertIn("wechat 1", report)
         self.assertIn("in-app only", report)
         self.assertIn("unresolved failed uploads: 1", report)
-        self.assertIn("other: 1 failure", report)
+        self.assertIn("other: nothing", report)
+        self.assertIn("noise hidden: 1", report)
         self.assertNotIn("favicon", report)
 
     def test_ux_records_the_run_and_every_skips_until_it_is_due(self) -> None:

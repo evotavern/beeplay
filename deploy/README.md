@@ -93,7 +93,7 @@ loaded after 10 s, or throws in its first 30 s. The thresholds are in
 `/etc/beeplay/beeplay.env`. Crash reports are unauthenticated: if fake reports
 hide a good game, `beeplay-ops status <id> live`.
 
-What players ran into since the last check, by area and browser:
+What players ran into since the last check, by area and then by browser:
 
 ```bash
 beeplay-ops ux                    # since the last check, then records this one
@@ -101,12 +101,17 @@ beeplay-ops ux --every 60         # only if the last check is over an hour old
 beeplay-ops ux --since 2h --no-mark
 ```
 
-It reads `http_error` (every 4xx/5xx the app answered, with the browser),
-`client_error` (what the page's own reporter, `assets/js/page-reporter.js`,
-caught: script errors and uploads that never reached the app, e.g. a 413 from
-the edge proxy) and the crash events above. Creation and gameplay are listed in full,
-everything else is only counted; "in-app only" means every report came from
-WeChat, QQ, Douyin or another in-app browser.
+It reads `http_error` (every 4xx/5xx the app answered), `client_error` (what
+the page's own reporter, `assets/js/page-reporter.js`, caught: script errors
+and uploads that never reached the app, e.g. a 413 from the edge proxy) and
+the crash events above. Every area (creation, gameplay, other) is listed in
+full, one entry per browser string, so one player hitting the same wall reads
+as one entry (several people can share a browser string). Each entry has
+`saw (inferred):`, what the page shows for that failure according to the code,
+and "in-app only" when every report came from WeChat, QQ, Douyin or another
+in-app browser. A 404/405 is scanner noise, only counted ("noise hidden"),
+unless its event records that the request carried a BeePlay cookie; the app
+does not record that yet, so for now every 404/405 is noise.
 
 Tracing one game or one uploader:
 
