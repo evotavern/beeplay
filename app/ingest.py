@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app import config, events
 from app.game_imports import install_folder
-from app.models import STATUSES, FailedUpload, User, Work
+from app.models import STATUSES, VIEWPORT_MODES, FailedUpload, User, Work
 
 ARTS = ("art-one", "art-two", "art-three", "art-four")
 
@@ -103,7 +103,8 @@ def set_status(session: Session, work: Work, status: str, *, actor: str) -> None
 
 
 def replace(
-    session: Session, work: Work, *, entries: list[tuple[str, bytes]], actor: str
+    session: Session, work: Work, *, entries: list[tuple[str, bytes]], actor: str,
+    reactivate: bool = True,
 ) -> None:
     """Serve a new version. The old directory stays on disk, unreferenced.
 
@@ -119,8 +120,22 @@ def replace(
         before={"artifact": before}, after={"artifact": artifact},
     )
     session.commit()
-    if work.status == "hidden":
+    if reactivate and work.status == "hidden":
         set_status(session, work, "live", actor=actor)
+
+
+def set_viewport_mode(session: Session, work: Work, mode: str, *, actor: str) -> None:
+    if mode not in VIEWPORT_MODES:
+        raise ValueError(f"viewport mode must be one of {', '.join(VIEWPORT_MODES)}")
+    if work.viewport_mode == mode:
+        return
+    before = work.viewport_mode
+    work.viewport_mode = mode
+    events.record(
+        session, work, actor=actor, kind="viewport_mode_changed",
+        before={"viewport_mode": before}, after={"viewport_mode": mode},
+    )
+    session.commit()
 
 
 def capture_failure(

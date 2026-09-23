@@ -733,7 +733,8 @@
       candidate.classList.toggle("active-game", active);
       hostMessage(frame, active ? "activate" : "deactivate", {
         muted: !audioUnlocked,
-        transition_ms: 200
+        transition_ms: 200,
+        viewport_mode: candidate.dataset.viewportMode || "fixed"
       });
       if (active) {
         var play = inlinePlays.get(frame);
@@ -778,7 +779,8 @@
         }
         hostMessage(frame, card === activeInlineCard ? "activate" : "deactivate", {
           muted: !audioUnlocked,
-          transition_ms: 0
+          transition_ms: 0,
+          viewport_mode: card.dataset.viewportMode || "fixed"
         });
       });
     });
@@ -790,7 +792,7 @@
     document.querySelectorAll(".game-window").forEach(function (windowElement) {
       var stage = windowElement.querySelector(".game-stage");
       if (!stage) return;
-      var scale = Math.min(windowElement.clientWidth / 390, windowElement.clientHeight / stage.offsetHeight);
+      var scale = Math.min(windowElement.clientWidth / 390, windowElement.clientHeight / 640);
       stage.style.setProperty("--game-scale", Math.max(0.1, scale).toFixed(4));
     });
   }
@@ -813,15 +815,6 @@
       reportHealth(matched, "loaded");
     } else if (data.beeplay === "error") {
       reportHealth(matched, "error", data.detail);
-    } else if (data.beeplay === "layout") {
-      var measuredHeight = Number(data.height);
-      var stage = matched.card.querySelector(".game-stage");
-      if (stage && measuredHeight > 640 && measuredHeight <= 900) {
-        var compatibilityHeight = Math.max(820, Math.ceil(measuredHeight) + 48);
-        stage.style.height = compatibilityHeight + "px";
-        matched.frame.style.height = compatibilityHeight + "px";
-        sizeInlineStages();
-      }
     }
   });
 

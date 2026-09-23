@@ -1178,6 +1178,10 @@
     .game-window .game-frame {
       display: block; width: 390px; height: 640px; border: 0; background: #111;
     }
+    /* Chromium paints a native iframe scrollbar outside the document's CSS.
+       Scroll-mode games get a narrow clipped gutter so it stays usable but
+       never appears as a second bar inside the game window. */
+    .game-card[data-viewport-mode="scroll"] .game-frame { width: 406px; }
     .game-loading {
       position: absolute; inset: 0; z-index: 1; display: grid; place-content: center;
       justify-items: center; gap: 10px; color: var(--ink); background: var(--lime-light);

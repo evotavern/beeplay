@@ -78,6 +78,20 @@ class OpsTests(unittest.TestCase):
         with self.session() as session:
             self.assertEqual(session.scalar(select(Work.status)), "unlisted")
 
+    def test_viewport_mode_is_audited(self) -> None:
+        self.run_ops(
+            "import", str(self.game), "--owner", "bee-2", "--title", "Tall",
+            "--category", "puzzle", "--emoji", "🎮",
+        )
+        self.run_ops("viewport", "1", "scroll")
+        with self.session() as session:
+            work = session.get(Work, 1)
+            event = session.scalar(
+                select(WorkEvent).where(WorkEvent.kind == "viewport_mode_changed")
+            )
+            self.assertEqual(work.viewport_mode, "scroll")
+            self.assertEqual(event.after, '{"viewport_mode": "scroll"}')
+
     def test_fix_and_insert_a_failed_upload_keeps_the_uploaders_details(self) -> None:
         with self.session() as session:
             user = session.scalar(select(User))
@@ -180,6 +194,21 @@ class OpsTests(unittest.TestCase):
         self.assertIn(REPORTER_MARKER, (config.GAMES_DIR / work.artifact_hash / "index.html").read_bytes())
         self.assertTrue((legacy / "index.html").is_file())
         self.assertEqual(len(replaced), 1)
+
+    def test_refresh_reporter_does_not_reactivate_hidden_games(self) -> None:
+        legacy = config.GAMES_DIR / "hidden-artifact"
+        legacy.mkdir(parents=True)
+        (legacy / "index.html").write_text("<html><head></head></html>")
+        with self.session() as session:
+            session.add(Work(
+                title="Hidden", author="A", category="c", emoji="🎮", art="art-one",
+                collection="feed", artifact_hash="hidden-artifact", status="hidden",
+            ))
+            session.commit()
+
+        self.run_ops("refresh-reporter")
+        with self.session() as session:
+            self.assertEqual(session.scalar(select(Work.status)), "hidden")
 
 
 if __name__ == "__main__":

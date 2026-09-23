@@ -43,6 +43,21 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(self.revision(), HEAD_REVISION)
         self.assert_matches_models()
 
+    def test_known_games_receive_compatibility_modes(self) -> None:
+        migrate(self.engine, "0006")
+        with self.engine.begin() as connection:
+            connection.execute(text(
+                "INSERT INTO works (id,title,author,category,emoji,art,collection,position,"
+                "artifact_hash,status,created_at) VALUES "
+                "(12,'今日咖啡心情','A','c','x','art-one','feed',0,'other','live',CURRENT_TIMESTAMP),"
+                "(14,'tetris','A','c','x','art-one','feed',0,'other-2','live',CURRENT_TIMESTAMP),"
+                "(20,'native','A','c','x','art-one','feed',0,'native','live',CURRENT_TIMESTAMP)"
+            ))
+        migrate(self.engine)
+        with self.engine.connect() as connection:
+            modes = dict(connection.execute(text("SELECT id, viewport_mode FROM works")).all())
+        self.assertEqual(modes, {12: "scroll", 14: "compress", 20: "fixed"})
+
     def test_pre_alembic_database_keeps_its_rows(self) -> None:
         with self.engine.begin() as connection:
             connection.execute(text(LEGACY_WORKS))

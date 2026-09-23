@@ -20,6 +20,33 @@
       window.parent.postMessage({ beeplay: "layout", width: width, height: height }, "*");
     } catch (ignored) {}
   }
+  var compatibilityStyle = null;
+  function styleFor(mode) {
+    if (!compatibilityStyle) {
+      compatibilityStyle = document.createElement("style");
+      compatibilityStyle.id = "beeplay-viewport-mode";
+      (document.head || document.documentElement).appendChild(compatibilityStyle);
+    }
+    compatibilityStyle.textContent = mode === "scroll"
+      ? "html{overflow-y:auto!important;scrollbar-width:none!important;overscroll-behavior:contain!important}" +
+        "html::-webkit-scrollbar,body::-webkit-scrollbar{display:none!important;width:0!important}"
+      : "html{overflow:hidden!important}";
+  }
+  function applyViewportMode(mode) {
+    mode = mode === "compress" || mode === "scroll" ? mode : "fixed";
+    if (!document.body) return;
+    document.body.style.transform = "";
+    document.body.style.transformOrigin = "";
+    styleFor(mode);
+    if (mode !== "compress") return;
+    requestAnimationFrame(function () {
+      var root = document.documentElement;
+      var body = document.body;
+      var height = Math.max(root.scrollHeight, body.scrollHeight, 640);
+      body.style.transformOrigin = "top center";
+      body.style.transform = "scaleY(" + Math.min(1, 640 / height).toFixed(5) + ")";
+    });
+  }
   // Capture phase also sees resource failures, which do not bubble. Only a
   // script that fails to load counts; a missing image is not a crash.
   window.addEventListener("error", function (event) {
@@ -51,6 +78,7 @@
       });
       window.dispatchEvent(new CustomEvent("beeplay:lifecycle", { detail: data }));
       if (data.beeplayHost === "activate") {
+        applyViewportMode(data.viewport_mode);
         requestAnimationFrame(function () { requestAnimationFrame(sendLayout); });
       }
     } catch (ignored) {}

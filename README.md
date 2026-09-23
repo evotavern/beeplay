@@ -69,6 +69,10 @@ tools/export-icons.cjs     # 图标导出脚本
 同一协议处理 Web Audio。旧导入游戏仍能运行，但不符合画布契约的作品必须单独适配后才能
 作为正式演示内容。
 
+每个作品在数据库中保存一个 `viewport_mode`：新游戏使用 `fixed`；略高于画布的旧游戏使用
+`compress` 在画布内部纵向压缩；长页面使用 `scroll`，只在游戏窗口内部滚动且隐藏滚动条。
+运营可用 `beeplay-ops viewport WORK_ID fixed|compress|scroll` 明确修改，宿主不再根据高度猜测。
+
 ## 社交数据
 
 - 点赞与收藏要求先领取测试身份；两者都可撤销，并按「身份 + 游戏」唯一保存。

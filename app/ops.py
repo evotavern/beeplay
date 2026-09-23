@@ -6,6 +6,7 @@
     beeplay-ops import DIR_OR_ZIP --owner beeplay --title … --category … --emoji … [--unlisted]
     beeplay-ops replace WORK_ID DIR_OR_ZIP   # ship a fix; a hidden game comes back live
     beeplay-ops status WORK_ID live|hidden|unlisted|deleted
+    beeplay-ops viewport WORK_ID fixed|compress|scroll
     beeplay-ops health WORK_ID               # recent plays and errors
     beeplay-ops history WORK_ID              # the audit trail
     beeplay-ops ux [--every 60] [--since 2h] # what users hit since the last check
@@ -27,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from app import config, db, health, ingest, ux
 from app.game_imports import REPORTER_MARKER, REPORTER_VERSION, GameImportError, read_zip
-from app.models import STATUSES, FailedUpload, User, Work, WorkEvent, utcnow
+from app.models import STATUSES, VIEWPORT_MODES, FailedUpload, User, Work, WorkEvent, utcnow
 
 
 def _actor() -> str:
@@ -63,7 +64,8 @@ def cmd_list(session: Session, args) -> None:
     for work in session.scalars(stmt):
         print(
             f"{work.id:>4}  {work.status:<8}  {_owner_slug(session, work):<8}  "
-            f"{work.created_at:%m-%d %H:%M}  {work.artifact_hash}  {work.title}"
+            f"{work.created_at:%m-%d %H:%M}  {work.viewport_mode:<8}  "
+            f"{work.artifact_hash}  {work.title}"
         )
 
 
@@ -129,6 +131,12 @@ def cmd_status(session: Session, args) -> None:
     print(f"work {work.id} is {work.status}")
 
 
+def cmd_viewport(session: Session, args) -> None:
+    work = _work(session, args.work_id)
+    ingest.set_viewport_mode(session, work, args.mode, actor=_actor())
+    print(f"work {work.id} viewport is {work.viewport_mode}")
+
+
 def cmd_health(session: Session, args) -> None:
     work = _work(session, args.work_id)
     current = health.summary(session, work)
@@ -161,7 +169,9 @@ def cmd_refresh_reporter(session: Session, args) -> None:
             continue
         if REPORTER_VERSION in index.read_bytes():
             continue
-        ingest.replace(session, work, entries=_entries(directory), actor=_actor())
+        ingest.replace(
+            session, work, entries=_entries(directory), actor=_actor(), reactivate=False
+        )
         print(f"work {work.id}: reporter added, now {work.artifact_hash}")
 
 
@@ -245,6 +255,11 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("work_id", type=int)
     status.add_argument("status", choices=STATUSES)
     status.set_defaults(run=cmd_status)
+
+    viewport = commands.add_parser("viewport")
+    viewport.add_argument("work_id", type=int)
+    viewport.add_argument("mode", choices=VIEWPORT_MODES)
+    viewport.set_defaults(run=cmd_viewport)
 
     for name, run in (("health", cmd_health), ("history", cmd_history)):
         sub = commands.add_parser(name)

@@ -2,14 +2,14 @@
         <div class="home-feed" id="homeFeed" aria-label="从下方信息栏上下滑动切换游戏">
           {% for game in games %}
           {% set title = display_title(game.artifact_hash, game.title) %}
-          <article class="game-card" data-game-id="{{ game.id }}" data-game-title="{{ title }}" data-artifact="{{ game.artifact_hash }}" data-owner-id="{{ game.user_id or '' }}">
+          <article class="game-card" data-game-id="{{ game.id }}" data-game-title="{{ title }}" data-artifact="{{ game.artifact_hash }}" data-owner-id="{{ game.user_id or '' }}" data-viewport-mode="{{ game.viewport_mode }}">
             <div class="game-window" aria-label="{{ title }} 游戏窗口">
               <div class="game-stage">
-                <iframe class="game-frame" {% if loop.first %}src="/games/{{ game.artifact_hash }}/index.html"{% else %}data-src="/games/{{ game.artifact_hash }}/index.html"{% endif %} sandbox="allow-scripts" allow="autoplay" scrolling="no" title="{{ title }}"></iframe>
+                <iframe class="game-frame" {% if loop.first %}src="/games/{{ game.artifact_hash }}/index.html"{% else %}data-src="/games/{{ game.artifact_hash }}/index.html"{% endif %} sandbox="allow-scripts" allow="autoplay" scrolling="{{ 'yes' if game.viewport_mode == 'scroll' else 'no' }}" title="{{ title }}"></iframe>
               </div>
               <div class="game-loading" aria-hidden="true"><span>{{ game.emoji }}</span><small>正在进入 {{ title }}</small></div>
             </div>
-            <div class="game-tray" data-feed-swipe aria-label="{{ game.title }} 信息和切换区域">
+            <div class="game-tray" data-feed-swipe aria-label="{{ title }} 信息和切换区域">
               <div class="tray-handle" aria-hidden="true"></div>
               <div class="game-tray-copy">
                 <div class="game-title-row"><div><h2>{{ title }}</h2><p>{{ game.description or (game.category ~ ' · 互动小游戏') }}</p></div>
