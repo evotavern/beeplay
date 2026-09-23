@@ -8,6 +8,7 @@
     beeplay-ops status WORK_ID live|hidden|unlisted|deleted
     beeplay-ops health WORK_ID               # recent plays and errors
     beeplay-ops history WORK_ID              # the audit trail
+    beeplay-ops ux [--every 60] [--since 2h] # what users hit since the last check
     beeplay-ops refresh-reporter             # add the crash reporter to older games
     beeplay-ops migrate                      # schema + seed; release.sh runs it
 
@@ -18,14 +19,15 @@ import argparse
 import getpass
 import os
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import config, db, health, ingest
+from app import config, db, health, ingest, ux
 from app.game_imports import REPORTER_MARKER, GameImportError, read_zip
-from app.models import STATUSES, FailedUpload, User, Work, WorkEvent
+from app.models import STATUSES, FailedUpload, User, Work, WorkEvent, utcnow
 
 
 def _actor() -> str:
@@ -163,6 +165,47 @@ def cmd_refresh_reporter(session: Session, args) -> None:
         print(f"work {work.id}: reporter added, now {work.artifact_hash}")
 
 
+def _duration(text: str) -> str:
+    ux.parse_duration(text)  # argparse turns the ValueError into a usage error
+    return text
+
+
+def _ux_state() -> Path:
+    # Next to the events log, so the service user can write it and it
+    # survives releases; deliberately not in the repo.
+    return config.EVENTS_LOG.with_name("ux-last-run")
+
+
+def cmd_ux(session: Session, args) -> None:
+    now = utcnow()
+    state = _ux_state()
+    last = datetime.fromisoformat(state.read_text().strip()) if state.is_file() else None
+
+    if args.every is not None and last is not None:
+        due = last + timedelta(minutes=args.every)
+        if now < due:
+            print(f"last check {ux.minutes(now - last)} min ago; "
+                  f"next check due in {ux.minutes(due - now) + 1} min")
+            return
+
+    if args.since:
+        since, window = now - ux.parse_duration(args.since), f"last {args.since}"
+    elif last is not None:
+        since, window = last, f"since last check, {ux.minutes(now - last)} min ago"
+    else:
+        since, window = now - ux.DEFAULT_WINDOW, "last 24h; never checked before"
+
+    unresolved = len(session.scalars(
+        select(FailedUpload.id).where(FailedUpload.resolved_work_id.is_(None))
+    ).all())
+    summary = ux.summarize(ux.read_events(config.EVENTS_LOG, since=since))
+    print(ux.render(summary, since=since, now=now, window=window, unresolved_uploads=unresolved))
+
+    if not args.no_mark:
+        state.parent.mkdir(parents=True, exist_ok=True)
+        state.write_text(now.isoformat())
+
+
 def cmd_migrate(session: Session, args) -> None:
     db.init_db()
     print("database is at the latest schema")
@@ -207,6 +250,14 @@ def build_parser() -> argparse.ArgumentParser:
         sub = commands.add_parser(name)
         sub.add_argument("work_id", type=int)
         sub.set_defaults(run=run)
+
+    checking = commands.add_parser("ux", help="what users ran into since the last check")
+    checking.add_argument("--since", metavar="DURATION", type=_duration,
+                          help="window instead of since-last-check, e.g. 30m, 2h, 1d")
+    checking.add_argument("--every", type=int, metavar="MINUTES",
+                          help="do nothing if the last check is more recent than this")
+    checking.add_argument("--no-mark", action="store_true", help="don't record this as a check")
+    checking.set_defaults(run=cmd_ux)
 
     commands.add_parser("refresh-reporter").set_defaults(run=cmd_refresh_reporter)
     commands.add_parser("migrate").set_defaults(run=cmd_migrate)

@@ -118,6 +118,47 @@ class OpsTests(unittest.TestCase):
             self.assertEqual(session.get(Work, work_id).status, "live")
         self.assertIn(str(work_id), self.run_ops("list"))
 
+    def test_ux_reports_what_users_hit_since_the_last_check(self) -> None:
+        events.log_event("http_error", method="POST", path="/api/import-game", status=422, browser="wechat")
+        events.log_event("health_fail", work_id=7, detail="script failed to load", browser="wechat")
+        events.log_event("http_error", method="GET", path="/favicon.ico", status=404, browser="mobile")
+        with self.session() as session:
+            user = session.scalar(select(User))
+            details = ingest.validate_details(
+                title="Broken", category="c", emoji="🔥", art="art-one", description=None
+            )
+            ingest.capture_failure(
+                session, owner=user, details=details, raw_zip=pack_zip([("game.js", b"x")]),
+                error="游戏需要包含 index.html",
+            )
+
+        report = self.run_ops("ux")
+
+        self.assertIn("never checked before", report)
+        self.assertIn("POST /api/import-game → 422", report)
+        self.assertIn("work 7: script failed to load", report)
+        self.assertIn("wechat 1", report)
+        self.assertIn("in-app only", report)
+        self.assertIn("unresolved failed uploads: 1", report)
+        self.assertIn("other: 1 failure", report)
+        self.assertNotIn("favicon", report)
+
+    def test_ux_records_the_run_and_every_skips_until_it_is_due(self) -> None:
+        self.run_ops("ux")
+        self.assertTrue((self.root / "ux-last-run").is_file())
+
+        skipped = self.run_ops("ux", "--every", "60")
+        self.assertIn("next check due in", skipped)
+        self.assertNotIn("creation", skipped)
+
+        again = self.run_ops("ux")
+        self.assertIn("last check", again)
+        self.assertIn("creation: nothing", again)
+
+    def test_ux_since_and_no_mark(self) -> None:
+        self.run_ops("ux", "--since", "2h", "--no-mark")
+        self.assertFalse((self.root / "ux-last-run").exists())
+
     def test_refresh_reporter_republishes_games_installed_without_it(self) -> None:
         legacy = config.GAMES_DIR / "af359667cf6a8038"
         legacy.mkdir(parents=True)

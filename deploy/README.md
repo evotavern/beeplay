@@ -65,6 +65,7 @@ Everything lives in `/var/lib/beeplay`:
 | `games/<artifact>/` | one directory per uploaded version; replaced versions stay |
 | `failed/<id>.zip` | uploads that failed validation, waiting for an operator |
 | `logs/events.jsonl` | one JSON line per event; the journal has the same lines |
+| `logs/ux-last-run` | when `beeplay-ops ux` last ran |
 
 ## Operating the event
 
@@ -85,6 +86,21 @@ failures are at least half of the plays. A play fails if the game has not
 loaded after 10 s, or throws in its first 30 s. The thresholds are in
 `/etc/beeplay/beeplay.env`. Crash reports are unauthenticated: if fake reports
 hide a good game, `beeplay-ops status <id> live`.
+
+What players ran into since the last check, by area and browser:
+
+```bash
+beeplay-ops ux                    # since the last check, then records this one
+beeplay-ops ux --every 60         # only if the last check is over an hour old
+beeplay-ops ux --since 2h --no-mark
+```
+
+It reads `http_error` (every 4xx/5xx the app answered, with the browser),
+`client_error` (what the page's own reporter, `assets/js/page-reporter.js`,
+caught: script errors and uploads that never reached the app, e.g. a 413 from
+Nginx) and the crash events above. Creation and gameplay are listed in full,
+everything else is only counted; "in-app only" means every report came from
+WeChat, QQ, Douyin or another in-app browser.
 
 Tracing one game or one uploader:
 
