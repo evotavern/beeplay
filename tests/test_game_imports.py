@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.game_imports import (
     REPORTER_MARKER,
+    REPORTER_VERSION,
     GameImportError,
     inject_reporter,
     install_folder,
@@ -24,6 +25,14 @@ def make_zip(files: dict[str, str]) -> bytes:
 
 
 class GameImportTests(unittest.TestCase):
+    def test_upgrades_the_legacy_reporter_in_place(self) -> None:
+        legacy = REPORTER_MARKER + b"<script>oldReporter()</script><main>game</main>"
+        upgraded = inject_reporter(legacy)
+        self.assertIn(REPORTER_VERSION, upgraded)
+        self.assertNotIn(b"oldReporter", upgraded)
+        self.assertEqual(upgraded.count(REPORTER_MARKER), 1)
+        self.assertIn(b"<main>game</main>", upgraded)
+
     def test_installs_a_dist_folder_without_changing_its_contents(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             artifact = install_folder(

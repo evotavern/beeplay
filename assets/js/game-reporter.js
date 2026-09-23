@@ -11,6 +11,15 @@
       );
     } catch (ignored) {}
   }
+  function sendLayout() {
+    try {
+      var root = document.documentElement;
+      var body = document.body;
+      var width = Math.max(root.scrollWidth, body ? body.scrollWidth : 0);
+      var height = Math.max(root.scrollHeight, body ? body.scrollHeight : 0);
+      window.parent.postMessage({ beeplay: "layout", width: width, height: height }, "*");
+    } catch (ignored) {}
+  }
   // Capture phase also sees resource failures, which do not bubble. Only a
   // script that fails to load counts; a missing image is not a crash.
   window.addEventListener("error", function (event) {
@@ -41,7 +50,13 @@
         }
       });
       window.dispatchEvent(new CustomEvent("beeplay:lifecycle", { detail: data }));
+      if (data.beeplayHost === "activate") {
+        requestAnimationFrame(function () { requestAnimationFrame(sendLayout); });
+      }
     } catch (ignored) {}
   });
-  window.addEventListener("load", function () { send("loaded"); });
+  window.addEventListener("load", function () {
+    send("loaded");
+    requestAnimationFrame(function () { requestAnimationFrame(sendLayout); });
+  });
 })();

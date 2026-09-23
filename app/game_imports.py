@@ -18,11 +18,15 @@ MAX_UNPACKED_BYTES = 100 * 1024 * 1024
 
 
 REPORTER_MARKER = b"<!--beeplay-reporter-->"
+REPORTER_VERSION = b"<!--beeplay-reporter-v3-->"
+REPORTER_END = b"<!--/beeplay-reporter-->"
 _REPORTER = (
     REPORTER_MARKER
+    + REPORTER_VERSION
     + b"<script>"
     + (BASE_DIR / "assets" / "js" / "game-reporter.js").read_bytes()
     + b"</script>"
+    + REPORTER_END
 )
 
 
@@ -36,8 +40,19 @@ def inject_reporter(html: bytes) -> bytes:
     Works on bytes so a game in any encoding survives untouched. Idempotent,
     because an operator may re-import a bundle copied from the games store.
     """
-    if REPORTER_MARKER in html:
+    if REPORTER_VERSION in html:
         return html
+    if REPORTER_MARKER in html:
+        # Reporter v1 had no closing marker, but its injected script was the
+        # first script after the marker and never contained a literal closing
+        # script tag. Replace it in place so existing games can be upgraded.
+        return re.sub(
+            re.escape(REPORTER_MARKER) + rb".*?</script>",
+            lambda _: _REPORTER,
+            html,
+            count=1,
+            flags=re.DOTALL,
+        )
     for tag in (rb"<head(?:\s[^>]*)?>", rb"<html(?:\s[^>]*)?>"):
         match = re.search(tag, html, re.IGNORECASE)
         if match:

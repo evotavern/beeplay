@@ -722,9 +722,14 @@
 
   function activateInlineGame(card) {
     if (!card || card === activeInlineCard) return;
-    document.querySelectorAll(".game-card").forEach(function (candidate) {
+    var candidates = [].slice.call(document.querySelectorAll(".game-card"));
+    var activeIndex = candidates.indexOf(card);
+    candidates.forEach(function (candidate, index) {
       var frame = candidate.querySelector(".game-frame");
       var active = candidate === card;
+      if (frame && Math.abs(index - activeIndex) <= 1 && !frame.hasAttribute("src") && frame.dataset.src) {
+        frame.setAttribute("src", frame.dataset.src);
+      }
       candidate.classList.toggle("active-game", active);
       hostMessage(frame, active ? "activate" : "deactivate", {
         muted: !audioUnlocked,
@@ -764,6 +769,8 @@
       inlinePlays.set(frame, play);
       frame.addEventListener("load", function () {
         frame.classList.add("loaded");
+        var loading = card.querySelector(".game-loading");
+        if (loading) loading.hidden = true;
         if (play.started && !play.loaded) {
           play.loaded = true;
           clearTimeout(play.loadTimer);
@@ -775,8 +782,20 @@
         });
       });
     });
+    sizeInlineStages();
     if (cards.length) activateInlineGame(cards[0]);
   }
+
+  function sizeInlineStages() {
+    document.querySelectorAll(".game-window").forEach(function (windowElement) {
+      var stage = windowElement.querySelector(".game-stage");
+      if (!stage) return;
+      var scale = Math.min(windowElement.clientWidth / 390, windowElement.clientHeight / stage.offsetHeight);
+      stage.style.setProperty("--game-scale", Math.max(0.1, scale).toFixed(4));
+    });
+  }
+
+  window.addEventListener("resize", sizeInlineStages);
 
   window.addEventListener("message", function (event) {
     var matched = null;
@@ -788,9 +807,21 @@
     if (data.beeplay === "loaded" && !matched.loaded) {
       matched.loaded = true;
       clearTimeout(matched.loadTimer);
+      matched.frame.classList.add("loaded");
+      var loading = matched.card.querySelector(".game-loading");
+      if (loading) loading.hidden = true;
       reportHealth(matched, "loaded");
     } else if (data.beeplay === "error") {
       reportHealth(matched, "error", data.detail);
+    } else if (data.beeplay === "layout") {
+      var measuredHeight = Number(data.height);
+      var stage = matched.card.querySelector(".game-stage");
+      if (stage && measuredHeight > 640 && measuredHeight <= 900) {
+        var compatibilityHeight = Math.max(820, Math.ceil(measuredHeight) + 48);
+        stage.style.height = compatibilityHeight + "px";
+        matched.frame.style.height = compatibilityHeight + "px";
+        sizeInlineStages();
+      }
     }
   });
 

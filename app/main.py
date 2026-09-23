@@ -1,4 +1,6 @@
 import hashlib
+import html
+import re
 import os
 from functools import lru_cache
 import secrets
@@ -158,6 +160,23 @@ templates.env.keep_trailing_newline = True
 templates.env.globals["avatar"] = avatar
 templates.env.globals["asset"] = asset
 templates.env.globals["load_timeout_s"] = config.LOAD_TIMEOUT_S
+
+
+@lru_cache
+def display_title(artifact: str | None, stored: str) -> str:
+    """Recover legacy rows that accidentally stored the entry filename."""
+    if stored.strip().lower() not in {"index.html", "index.htm"} or not artifact:
+        return stored
+    entry = GAMES_DIR / artifact / "index.html"
+    try:
+        source = entry.read_text(errors="ignore")[:64_000]
+    except OSError:
+        return stored
+    match = re.search(r"<title[^>]*>(.*?)</title>", source, re.IGNORECASE | re.DOTALL)
+    return html.unescape(re.sub(r"\s+", " ", match.group(1))).strip() if match else stored
+
+
+templates.env.globals["display_title"] = display_title
 
 
 def render_view(request: Request, view: str, **context) -> HTMLResponse:

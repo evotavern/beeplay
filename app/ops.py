@@ -26,7 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import config, db, health, ingest, ux
-from app.game_imports import REPORTER_MARKER, GameImportError, read_zip
+from app.game_imports import REPORTER_MARKER, REPORTER_VERSION, GameImportError, read_zip
 from app.models import STATUSES, FailedUpload, User, Work, WorkEvent, utcnow
 
 
@@ -159,7 +159,7 @@ def cmd_refresh_reporter(session: Session, args) -> None:
         if not index.is_file():
             print(f"work {work.id}: {index} missing, skipped")
             continue
-        if REPORTER_MARKER in index.read_bytes():
+        if REPORTER_VERSION in index.read_bytes():
             continue
         ingest.replace(session, work, entries=_entries(directory), actor=_actor())
         print(f"work {work.id}: reporter added, now {work.artifact_hash}")
