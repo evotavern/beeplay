@@ -1,17 +1,35 @@
 import os
+import secrets
 from contextlib import asynccontextmanager
+from math import ceil
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
+from app.avatars import avatar
 from app.data import PROFILE_TABS
 from app.db import get_session, init_db
 from app.game_imports import GameImportError, install_folder, install_zip
-from app.repository import discover_works, feed_games, profile_works, register_imported_game
+from app.models import User
+from app.repository import (
+    COOKIE_NAME,
+    all_users,
+    claim,
+    cookie_value,
+    discover_works,
+    feed_games,
+    is_claimed,
+    next_free_at,
+    profile_works,
+    resolve_cookie,
+    utcnow,
+    register_imported_game,
+    works_count,
+)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -25,6 +43,18 @@ GAMES_DIR = Path(os.environ.get("BEEPLAY_GAMES_DIR", BASE_DIR / "games"))
 # lifespan hook runs. games/ is gitignored, so a fresh checkout has none.
 GAMES_DIR.mkdir(parents=True, exist_ok=True)
 
+# A month, so a tester's phone keeps the cookie across the whole event. The
+# claim itself expires long before this; the cookie only has to outlive it.
+COOKIE_MAX_AGE = 30 * 24 * 60 * 60
+CSRF_COOKIE_NAME = "beeplay_claim_csrf"
+CSRF_TOKEN_BYTES = 32
+
+# The current public deployment is IP-only HTTP. Claims are bearer-token
+# authentication, so production must not issue them over that transport. This
+# opt-in keeps local HTTP development convenient without silently weakening a
+# real deployment.
+ALLOW_INSECURE_CLAIMS = os.environ.get("BEEPLAY_ALLOW_INSECURE_CLAIMS") == "1"
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -32,7 +62,35 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Beeplay", lifespan=lifespan)
+def current_identity(
+    request: Request, session: Session = Depends(get_session)
+) -> tuple[User | None, str]:
+    """Resolve the claim cookie once per request and stash it for templates."""
+    identity = resolve_cookie(session, request.cookies.get(COOKIE_NAME))
+    request.state.identity = identity
+    return identity
+
+
+def claims_are_secure(request: Request) -> bool:
+    """Whether this request may issue or use a bearer claim cookie."""
+    return request.url.scheme == "https" or ALLOW_INSECURE_CLAIMS
+
+
+def csrf_token(request: Request) -> tuple[str, bool]:
+    """Return a double-submit CSRF token and whether it needs setting."""
+    token = request.cookies.get(CSRF_COOKIE_NAME)
+    if token:
+        return token, False
+    return secrets.token_urlsafe(CSRF_TOKEN_BYTES), True
+
+
+app = FastAPI(
+    title="Beeplay",
+    lifespan=lifespan,
+    # Applied to every route so base.html can render the claimed user's avatar
+    # without each handler having to ask for it.
+    dependencies=[Depends(current_identity)],
+)
 
 app.mount("/assets", StaticFiles(directory=BASE_DIR / "assets"), name="assets")
 
@@ -44,6 +102,7 @@ templates = Jinja2Templates(directory=BASE_DIR / "app" / "templates")
 # Preserve the template's trailing newline; Starlette 1.6 no longer
 # forwards env options through the Jinja2Templates constructor.
 templates.env.keep_trailing_newline = True
+templates.env.globals["avatar"] = avatar
 
 
 def render_view(request: Request, view: str, **context) -> HTMLResponse:
@@ -53,20 +112,37 @@ def render_view(request: Request, view: str, **context) -> HTMLResponse:
     document; an htmx nav click only needs what goes inside #viewport.
     """
     template = f"views/{view}.html" if "HX-Request" in request.headers else "base.html"
-    return templates.TemplateResponse(request, template, {"view": view, **context})
+    user, _ = getattr(request.state, "identity", (None, "anonymous"))
+    return templates.TemplateResponse(
+        request, template, {"view": view, "current_user": user, **context}
+    )
+
+
+def redirect(request: Request, url: str) -> Response:
+    """Send the browser elsewhere, whichever way it asked.
+
+    htmx swaps a redirect's body into #viewport instead of navigating, which
+    would push a whole document inside <main> and leave the address bar on the
+    old URL. HX-Redirect is the header that makes it a real navigation.
+    """
+    if "HX-Request" in request.headers:
+        return HTMLResponse("", headers={"HX-Redirect": url})
+    return RedirectResponse(url, status_code=303)
 
 
 def discover_context(session: Session, category: str) -> dict:
     return {"category": category, "works": discover_works(session, category)}
 
 
-def profile_context(session: Session, tab: str) -> dict:
+def profile_context(session: Session, user: User, tab: str) -> dict:
     if tab not in PROFILE_TABS:
         tab = "works"
     return {
         "tab": tab,
         "empty_title": PROFILE_TABS[tab],
-        "profile_works": profile_works(session) if tab == "works" else [],
+        "profile_user": user,
+        "works_total": works_count(session, user),
+        "profile_works": profile_works(session, user) if tab == "works" else [],
     }
 
 
@@ -92,11 +168,98 @@ def messages(request: Request) -> HTMLResponse:
     return render_view(request, "messages")
 
 
+@app.get("/claim", response_class=HTMLResponse)
+def claim_grid(
+    request: Request,
+    notice: str | None = None,
+    session: Session = Depends(get_session),
+    identity: tuple[User | None, str] = Depends(current_identity),
+) -> HTMLResponse:
+    """The identity picker.
+
+    Always a full document, never an htmx partial: it is the one page reached
+    by a plain link and by a redirect from anywhere else in the app.
+    """
+    user, _ = identity
+    now = utcnow()
+    free_at = next_free_at(session)
+    token, set_csrf_cookie = csrf_token(request)
+    response = templates.TemplateResponse(
+        request,
+        "base.html",
+        {
+            "view": "claim",
+            "current_user": user,
+            "claims_enabled": claims_are_secure(request),
+            "csrf_token": token,
+            "notice": notice,
+            "identities": [
+                {
+                    "user": candidate,
+                    "claimed": is_claimed(candidate, now),
+                    "mine": user is not None and candidate.id == user.id,
+                }
+                for candidate in all_users(session)
+            ],
+            "minutes_until_free": (
+                ceil((free_at - now).total_seconds() / 60) if free_at else None
+            ),
+        },
+    )
+    if set_csrf_cookie:
+        response.set_cookie(
+            CSRF_COOKIE_NAME,
+            token,
+            max_age=COOKIE_MAX_AGE,
+            httponly=True,
+            samesite="lax",
+            secure=request.url.scheme == "https",
+        )
+    return response
+
+
+@app.post("/claim/{slug}")
+def claim_identity(
+    slug: str,
+    request: Request,
+    csrf_token: str = "",
+    session: Session = Depends(get_session),
+    identity: tuple[User | None, str] = Depends(current_identity),
+) -> Response:
+    if not claims_are_secure(request):
+        raise HTTPException(status_code=403, detail="Claims require HTTPS")
+    csrf_cookie = request.cookies.get(CSRF_COOKIE_NAME)
+    if not csrf_cookie or not secrets.compare_digest(csrf_token, csrf_cookie):
+        raise HTTPException(status_code=403, detail="Invalid claim request")
+
+    holder, _ = identity
+    token = claim(session, slug, holder)
+    if token is None:
+        return redirect(request, "/claim?notice=taken")
+
+    response = redirect(request, "/")
+    response.set_cookie(
+        COOKIE_NAME,
+        cookie_value(slug, token),
+        max_age=COOKIE_MAX_AGE,
+        httponly=True,
+        samesite="lax",
+        secure=request.url.scheme == "https",
+    )
+    return response
+
+
 @app.get("/profile", response_class=HTMLResponse)
 def profile(
-    request: Request, tab: str = "works", session: Session = Depends(get_session)
-) -> HTMLResponse:
-    return render_view(request, "profile", **profile_context(session, tab))
+    request: Request,
+    tab: str = "works",
+    session: Session = Depends(get_session),
+    identity: tuple[User | None, str] = Depends(current_identity),
+) -> Response:
+    user, status = identity
+    if user is None:
+        return _bounce_to_claim(request, status)
+    return render_view(request, "profile", **profile_context(session, user, tab))
 
 
 @app.get("/partials/works", response_class=HTMLResponse)
@@ -110,10 +273,16 @@ def works_partial(
 
 @app.get("/partials/profile-works", response_class=HTMLResponse)
 def profile_works_partial(
-    request: Request, tab: str = "works", session: Session = Depends(get_session)
-) -> HTMLResponse:
+    request: Request,
+    tab: str = "works",
+    session: Session = Depends(get_session),
+    identity: tuple[User | None, str] = Depends(current_identity),
+) -> Response:
+    user, status = identity
+    if user is None:
+        return _bounce_to_claim(request, status)
     return templates.TemplateResponse(
-        request, "partials/profile_grid.html", profile_context(session, tab)
+        request, "partials/profile_grid.html", profile_context(session, user, tab)
     )
 
 
@@ -147,3 +316,12 @@ def import_game(
         session, artifact_hash=artifact, title=(title.strip() or fallback_title)[:120]
     )
     return JSONResponse({"title": game.title, "artifact": artifact})
+
+
+def _bounce_to_claim(request: Request, status: str) -> Response:
+    """Send an unidentified visitor to the picker, clearing a dead cookie."""
+    target = "/claim?notice=stolen" if status == "stolen" else "/claim"
+    response = redirect(request, target)
+    if status == "stolen":
+        response.delete_cookie(COOKIE_NAME)
+    return response

@@ -4,6 +4,14 @@ This deployment serves Beeplay directly on the server's public IP over HTTP.
 Nginx listens on port 80, serves assets and game artifacts from disk, and
 proxies application requests to uvicorn on `127.0.0.1:8000`.
 
+## HTTPS is required for tester identities
+
+The identity cookie is a bearer credential. The claim feature deliberately
+refuses to issue it over plain HTTP, so configure TLS and ensure Nginx passes
+`X-Forwarded-Proto: https` before deploying this branch. The current IP-only
+HTTP configuration remains suitable for browsing the prototype but not for
+claiming identities.
+
 For the current server, open `http://47.251.140.176/` after deployment.
 
 ## Install
@@ -52,6 +60,20 @@ firewall permits inbound TCP port 80.
 The app seeds its own SQLite database at `/var/lib/beeplay/beeplay.db` on
 first startup. The handoff game is listed in that seed data, and is rendered
 only after its `index.html` exists under `/var/lib/beeplay/games`.
+
+Startup is also what migrates a database that predates tester identities: it
+adds `works.user_id` if the column is missing, inserts any of the eight
+identities that are absent, and hands the three pre-existing profile works to
+the first of them. All three steps are guarded per row, so restarting is safe
+and there is no manual step to run after a deploy.
+
+Claims release themselves two hours after a tester's last request. To clear
+them all before a demo round:
+
+```bash
+sudo -u beeplay sqlite3 /var/lib/beeplay/beeplay.db \
+  "UPDATE users SET last_seen_at = NULL, claim_token = NULL;"
+```
 
 ## Verify
 
