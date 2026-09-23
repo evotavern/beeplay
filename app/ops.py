@@ -9,7 +9,7 @@
     beeplay-ops health WORK_ID               # recent plays and errors
     beeplay-ops history WORK_ID              # the audit trail
     beeplay-ops ux [--every 60] [--since 2h] # what users hit since the last check
-    beeplay-ops refresh-reporter             # add the crash reporter to older games
+    beeplay-ops refresh-reporter             # bring every game's reporter up to date
     beeplay-ops migrate                      # schema + seed; release.sh runs it
     beeplay-ops generations [--id ID]        # prompt-to-game speed and funnel
     beeplay-ops generation-keys [--enable ID] # provider key health and usage
@@ -31,7 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import config, db, generation, health, ingest, ux
-from app.game_imports import REPORTER_MARKER, GameImportError, read_zip
+from app.game_imports import GameImportError, read_zip, reporter_is_current
 from app.models import (
     STATUSES, FailedUpload, Generation, GenerationAttempt, GenerationEvent, GenerationKey,
     User, Work, WorkEvent, utcnow,
@@ -167,10 +167,11 @@ def cmd_refresh_reporter(session: Session, args) -> None:
         if not index.is_file():
             print(f"work {work.id}: {index} missing, skipped")
             continue
-        if REPORTER_MARKER in index.read_bytes():
+        if reporter_is_current(index.read_bytes()):
             continue
-        ingest.replace(session, work, entries=_entries(directory), actor=_actor())
-        print(f"work {work.id}: reporter added, now {work.artifact_hash}")
+        # A hidden game stays hidden: a new reporter does not fix its crash.
+        ingest.replace(session, work, entries=_entries(directory), actor=_actor(), revive=False)
+        print(f"work {work.id}: reporter updated, now {work.artifact_hash}")
 
 
 def _duration(text: str) -> str:

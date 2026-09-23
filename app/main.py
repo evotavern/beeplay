@@ -157,6 +157,9 @@ class GameFiles(StaticFiles):
         # Match the in-app sandbox even when an artifact is opened directly.
         response.headers["Content-Security-Policy"] = "sandbox allow-scripts"
         response.headers["X-Content-Type-Options"] = "nosniff"
+        # The sandbox's opaque origin fetches the game's own files from
+        # Origin: null; see deploy/beeplay.caddy.
+        response.headers["Access-Control-Allow-Origin"] = "*"
         return response
 
 

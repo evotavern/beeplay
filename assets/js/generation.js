@@ -285,6 +285,7 @@
     frame = document.createElement("iframe");
     frame.title = "试玩生成的游戏";
     frame.setAttribute("sandbox", "allow-scripts");
+    frame.setAttribute("allow", "autoplay");
     frame.referrerPolicy = "no-referrer";
     frame.src = job.preview_url;
     overlay.appendChild(frame);

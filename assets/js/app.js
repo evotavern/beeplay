@@ -543,6 +543,7 @@
   // chrome on screen, and nothing in the artifact had to change.
   var gameHost = document.getElementById("gameHost");
   var gameStop = document.getElementById("gameStop");
+  var gameMute = document.getElementById("gameMute");
 
   // One live session at a time: {hash, frame, card, active}. `active` false
   // means paused — the iframe is still mounted and still holding game state,
@@ -607,6 +608,7 @@
       play.loaded = true;
       clearTimeout(play.loadTimer);
       reportHealth(play, "loaded");
+      if (muted) tellGame("mute");
     } else if (data.beeplay === "error") {
       reportHealth(play, "error", data.detail);
     }
@@ -616,17 +618,47 @@
     var frame = document.createElement("iframe");
     frame.src = "/games/" + hash + "/index.html";
     // No allow-same-origin: the game runs on an opaque origin and cannot
-    // reach this document. There is deliberately no host API.
+    // reach this document. The host can only send it the four audio
+    // commands in tellGame(); there is deliberately no API beyond that.
     frame.setAttribute("sandbox", "allow-scripts");
+    // Lets Chrome start the game's audio without waiting for a tap inside the
+    // frame; elsewhere the reporter's shim resumes audio on the first tap.
+    frame.setAttribute("allow", "autoplay");
     frame.title = card.dataset.gameTitle || "游戏";
     frame.className = "game-frame";
     gameHost.appendChild(frame);
     return frame;
   }
 
+  // The game's inlined reporter (assets/js/game-reporter.js) holds its audio:
+  // a hidden iframe keeps playing sound, and the game cannot tell it is hidden.
+  function tellGame(command) {
+    if (!session || !session.frame || !session.frame.contentWindow) return;
+    session.frame.contentWindow.postMessage({ beeplayHost: command }, "*");
+  }
+
+  // One mute for every game, kept across visits like a feed's sound toggle.
+  var muted = false;
+  try { muted = localStorage.getItem("beeplay.muted") === "1"; } catch (ignored) {}
+
+  function showMute() {
+    if (!gameMute) return;
+    gameMute.textContent = muted ? "🔇" : "🔊";
+    gameMute.setAttribute("aria-label", muted ? "打开声音" : "静音");
+    gameMute.title = muted ? "打开声音" : "静音";
+  }
+
+  function toggleMute() {
+    muted = !muted;
+    try { localStorage.setItem("beeplay.muted", muted ? "1" : "0"); } catch (ignored) {}
+    showMute();
+    tellGame(muted ? "mute" : "unmute");
+  }
+
   function resumeGame(card, button) {
     session.card = card;
     session.active = true;
+    tellGame("resume");
     document.body.classList.add("playing");
     gameHost.hidden = false;
     if (button) { button.classList.add("active"); button.textContent = "Ⅱ"; }
@@ -637,6 +669,7 @@
     session.active = false;
     document.body.classList.remove("playing");
     gameHost.hidden = true;
+    tellGame("pause");
     // Hidden, not unmounted. The iframe stays in the DOM holding the game's
     // JS state, so resuming returns the user to their half-made cup. This is
     // the whole reason the host is body-level: a paused session has to survive
@@ -723,6 +756,8 @@
   // overlay covers .game-actions, so the card's own Ⅱ is unreachable while
   // playing. It pauses rather than ends — see pauseGame().
   if (gameStop) gameStop.addEventListener("click", pauseGame);
+  if (gameMute) gameMute.addEventListener("click", toggleMute);
+  showMute();
 
   document.addEventListener("keydown", function (event) {
     if (event.key === "Escape" && gamePlaying()) pauseGame();

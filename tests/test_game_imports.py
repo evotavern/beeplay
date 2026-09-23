@@ -12,6 +12,7 @@ from app.game_imports import (
     install_zip,
     pack_zip,
     read_zip,
+    reporter_is_current,
 )
 
 
@@ -55,3 +56,13 @@ class GameImportTests(unittest.TestCase):
                 install_folder(
                     [("index.html", b"ok"), ("../outside.txt", b"no")], Path(directory)
                 )
+
+    def test_swaps_an_older_reporter_for_the_current_one(self) -> None:
+        old = b"<html><head>" + REPORTER_MARKER + b"<script>oldReporter()</script><title>t</title></head></html>"
+        new = inject_reporter(old)
+        self.assertTrue(reporter_is_current(new))
+        self.assertNotIn(b"oldReporter", new)
+        self.assertEqual(new.count(REPORTER_MARKER), 1)
+        self.assertIn(b"<title>t</title>", new)
+        self.assertEqual(inject_reporter(new), new)
+

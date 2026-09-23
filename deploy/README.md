@@ -39,9 +39,10 @@ This copies the tree to `/root/beeplay-release/` and runs
 - keeps the previous code at `/srv/beeplay.prev`
 - syncs code, installs dependencies, the systemd unit, the BeePlay Caddy site and
   `/usr/local/bin/beeplay-ops`
-- stops the app, migrates the schema (`beeplay-ops migrate`), adds the crash
-  reporter to games installed before it existed (`beeplay-ops
-  refresh-reporter`), starts the app
+- stops the app, migrates the schema (`beeplay-ops migrate`), gives every
+  game the current reporter and sandbox shim (`beeplay-ops refresh-reporter`;
+  a changed `assets/js/game-reporter.js` republishes each game under a new
+  artifact, hidden games stay hidden), starts the app
 - waits for HTTP 200 and prints rollback commands if it never comes
 
 Schema changes are Alembic migrations in `migrations/versions/`. The app also

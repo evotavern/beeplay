@@ -111,13 +111,15 @@ def set_status(session: Session, work: Work, status: str, *, actor: str) -> None
 
 
 def replace(
-    session: Session, work: Work, *, entries: list[tuple[str, bytes]], actor: str
+    session: Session, work: Work, *, entries: list[tuple[str, bytes]], actor: str,
+    revive: bool = True,
 ) -> None:
     """Serve a new version. The old directory stays on disk, unreferenced.
 
     A new directory rather than an overwrite, because Caddy tells browsers to
     cache /games/ as immutable for a year. A hidden game comes back live:
-    replacing it is how staff deliver a fix.
+    replacing it is how staff deliver a fix. `revive=False` is for platform
+    refreshes that do not fix the game itself.
     """
     artifact = install_folder(entries, config.GAMES_DIR)
     before = work.artifact_hash
@@ -127,7 +129,7 @@ def replace(
         before={"artifact": before}, after={"artifact": artifact},
     )
     session.commit()
-    if work.status == "hidden":
+    if revive and work.status == "hidden":
         set_status(session, work, "live", actor=actor)
 
 

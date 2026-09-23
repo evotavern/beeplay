@@ -19,6 +19,10 @@ beeplay.top {
 		# Uploaded and generated games are untrusted: run them in an opaque
 		# origin even when opened directly, matching the in-app iframe.
 		header Content-Security-Policy "sandbox allow-scripts"
+		# That opaque origin sends Origin: null, so without this a game's own
+		# fetch/XHR (audio and model loaders) and module scripts are refused.
+		# Safe: the files are public, immutable and served without cookies.
+		header Access-Control-Allow-Origin "*"
 		file_server
 	}
 

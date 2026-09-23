@@ -30,14 +30,24 @@ class GameImportError(ValueError):
     pass
 
 
+def reporter_is_current(html: bytes) -> bool:
+    return _REPORTER in html
+
+
 def inject_reporter(html: bytes) -> bytes:
-    """Put the crash reporter first in the document, ahead of the game's scripts.
+    """Put the reporter first in the document, ahead of the game's scripts.
 
     Works on bytes so a game in any encoding survives untouched. Idempotent,
-    because an operator may re-import a bundle copied from the games store.
+    because an operator may re-import a bundle copied from the games store,
+    and an older reporter is swapped for the current one, which is how
+    `beeplay-ops refresh-reporter` brings installed games up to date.
     """
-    if REPORTER_MARKER in html:
+    if reporter_is_current(html):
         return html
+    start = html.find(REPORTER_MARKER)
+    end = html.find(b"</script>", start) if start >= 0 else -1
+    if end >= 0:
+        return html[:start] + _REPORTER + html[end + len(b"</script>") :]
     for tag in (rb"<head(?:\s[^>]*)?>", rb"<html(?:\s[^>]*)?>"):
         match = re.search(tag, html, re.IGNORECASE)
         if match:

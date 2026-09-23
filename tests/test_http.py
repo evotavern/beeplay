@@ -10,6 +10,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -77,6 +78,16 @@ class HttpTests(HttpTestCase):
             "/api/import-game", data=form, headers=headers,
             files={"bundle": ("game.zip", game_zip(), "application/zip")},
         )
+
+    def test_game_files_are_sandboxed_and_fetchable_from_the_sandbox(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "index.html").write_text("<canvas></canvas>")
+            games = FastAPI()
+            games.mount("/games", main.GameFiles(directory=directory))
+            served = TestClient(games).get("/games/index.html")
+        self.assertEqual(served.headers["content-security-policy"], "sandbox allow-scripts")
+        # The sandbox's opaque origin loads the game's own files as Origin: null.
+        self.assertEqual(served.headers["access-control-allow-origin"], "*")
 
     def test_claim_upload_play_and_crash_over_plain_http(self) -> None:
         self.assertEqual(self.upload().status_code, 401)
