@@ -107,7 +107,7 @@ def replace(
 ) -> None:
     """Serve a new version. The old directory stays on disk, unreferenced.
 
-    A new directory rather than an overwrite, because Nginx tells browsers to
+    A new directory rather than an overwrite, because Caddy tells browsers to
     cache /games/ as immutable for a year. A hidden game comes back live:
     replacing it is how staff deliver a fix.
     """

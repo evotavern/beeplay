@@ -131,7 +131,7 @@ async def log_failed_requests(request: Request, call_next) -> Response:
 
 app.mount("/assets", StaticFiles(directory=BASE_DIR / "assets"), name="assets")
 
-# Development convenience: in production Nginx serves /games/* straight from
+# Development convenience: in production Caddy serves /games/* straight from
 # disk, so game files never go through uvicorn's threadpool.
 app.mount("/games", StaticFiles(directory=GAMES_DIR), name="games")
 
@@ -139,7 +139,7 @@ app.mount("/games", StaticFiles(directory=GAMES_DIR), name="games")
 def asset(path: str) -> str:
     """URL for a file under assets/, versioned by its contents.
 
-    Nginx lets browsers cache /assets/ for a week, so an unversioned URL keeps
+    Caddy lets browsers cache /assets/ for a week, so an unversioned URL keeps
     returning visitors on the previous release's JavaScript after a deploy.
     Hashed once per process, i.e. once per release.
     """

@@ -104,7 +104,7 @@ beeplay-ops ux --since 2h --no-mark
 It reads `http_error` (every 4xx/5xx the app answered, with the browser),
 `client_error` (what the page's own reporter, `assets/js/page-reporter.js`,
 caught: script errors and uploads that never reached the app, e.g. a 413 from
-Nginx) and the crash events above. Creation and gameplay are listed in full,
+the edge proxy) and the crash events above. Creation and gameplay are listed in full,
 everything else is only counted; "in-app only" means every report came from
 WeChat, QQ, Douyin or another in-app browser.
 
