@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import uuid
 import zipfile
 from io import BytesIO
 from pathlib import Path, PurePosixPath
+
+from app.config import BASE_DIR
 
 
 MAX_ARCHIVE_BYTES = 25 * 1024 * 1024
@@ -14,8 +17,32 @@ MAX_FILES = 500
 MAX_UNPACKED_BYTES = 100 * 1024 * 1024
 
 
+REPORTER_MARKER = b"<!--beeplay-reporter-->"
+_REPORTER = (
+    REPORTER_MARKER
+    + b"<script>"
+    + (BASE_DIR / "assets" / "js" / "game-reporter.js").read_bytes()
+    + b"</script>"
+)
+
+
 class GameImportError(ValueError):
     pass
+
+
+def inject_reporter(html: bytes) -> bytes:
+    """Put the crash reporter first in the document, ahead of the game's scripts.
+
+    Works on bytes so a game in any encoding survives untouched. Idempotent,
+    because an operator may re-import a bundle copied from the games store.
+    """
+    if REPORTER_MARKER in html:
+        return html
+    for tag in (rb"<head(?:\s[^>]*)?>", rb"<html(?:\s[^>]*)?>"):
+        match = re.search(tag, html, re.IGNORECASE)
+        if match:
+            return html[: match.end()] + _REPORTER + html[match.end() :]
+    return _REPORTER + html
 
 
 def _checked_paths(entries: list[tuple[str, bytes]]) -> tuple[list[tuple[PurePosixPath, bytes]], bool]:
@@ -51,6 +78,8 @@ def _install(entries: list[tuple[str, bytes]], games_dir: Path) -> str:
             relative = PurePosixPath(*source.parts[1:]) if wrapped else source
             output = target.joinpath(*relative.parts)
             output.parent.mkdir(parents=True, exist_ok=True)
+            if relative == PurePosixPath("index.html"):
+                contents = inject_reporter(contents)
             output.write_bytes(contents)
     except Exception:
         shutil.rmtree(target, ignore_errors=True)
@@ -58,7 +87,8 @@ def _install(entries: list[tuple[str, bytes]], games_dir: Path) -> str:
     return artifact
 
 
-def install_zip(bundle: bytes, games_dir: Path) -> str:
+def read_zip(bundle: bytes) -> list[tuple[str, bytes]]:
+    """Unpack a zip into (path, contents) entries, enforcing the size limits."""
     if not bundle:
         raise GameImportError("请选择一个 zip 游戏包")
     if len(bundle) > MAX_ARCHIVE_BYTES:
@@ -77,7 +107,20 @@ def install_zip(bundle: bytes, games_dir: Path) -> str:
                 entries.append((member.filename, archive.read(member)))
     except zipfile.BadZipFile as error:
         raise GameImportError("只能上传 zip 格式的游戏包") from error
-    return _install(entries, games_dir)
+    return entries
+
+
+def pack_zip(entries: list[tuple[str, bytes]]) -> bytes:
+    """The inverse of read_zip, used to keep a failed folder upload as one file."""
+    output = BytesIO()
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, contents in entries:
+            archive.writestr(name, contents)
+    return output.getvalue()
+
+
+def install_zip(bundle: bytes, games_dir: Path) -> str:
+    return _install(read_zip(bundle), games_dir)
 
 
 def install_folder(entries: list[tuple[str, bytes]], games_dir: Path) -> str:

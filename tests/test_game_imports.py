@@ -4,7 +4,15 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from app.game_imports import GameImportError, install_folder, install_zip
+from app.game_imports import (
+    REPORTER_MARKER,
+    GameImportError,
+    inject_reporter,
+    install_folder,
+    install_zip,
+    pack_zip,
+    read_zip,
+)
 
 
 def make_zip(files: dict[str, str]) -> bytes:
