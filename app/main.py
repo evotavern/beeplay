@@ -7,13 +7,14 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.avatars import avatar
 from app.data import PROFILE_TABS
 from app.db import get_session, init_db
-from app import config, ingest
+from app import config, health, ingest
 from app.game_imports import GameImportError, pack_zip, read_zip
 from app.models import User
 from app.repository import (
@@ -103,6 +104,7 @@ templates = Jinja2Templates(directory=BASE_DIR / "app" / "templates")
 # forwards env options through the Jinja2Templates constructor.
 templates.env.keep_trailing_newline = True
 templates.env.globals["avatar"] = avatar
+templates.env.globals["load_timeout_s"] = config.LOAD_TIMEOUT_S
 
 
 def render_view(request: Request, view: str, **context) -> HTMLResponse:
@@ -341,6 +343,31 @@ def import_game(
             detail=f"这个游戏包有点闹脾气 🐝（{error}）。别慌，去找黑客松工作人员，我们帮你把它送上首页！",
         ) from error
     return JSONResponse({"title": game.title, "artifact": game.artifact_hash})
+
+
+class HealthReport(BaseModel):
+    artifact: str = Field(max_length=64)
+    session: str = Field(max_length=64)
+    kind: str
+    elapsed_ms: int | None = Field(default=None, ge=0)
+    detail: str | None = Field(default=None, max_length=2000)
+
+
+@app.post("/api/game-health", status_code=204)
+def game_health(report: HealthReport, session: Session = Depends(get_session)) -> Response:
+    """Crash signals forwarded by the game host; see app/health.py."""
+    try:
+        health.report(
+            session,
+            artifact_hash=report.artifact,
+            session_id=report.session,
+            kind=report.kind,
+            elapsed_ms=report.elapsed_ms,
+            detail=report.detail,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return Response(status_code=204)
 
 
 def _bounce_to_claim(request: Request, status: str) -> Response:

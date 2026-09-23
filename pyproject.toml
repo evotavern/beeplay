@@ -11,3 +11,8 @@ dependencies = [
     "sqlalchemy>=2.0.54",
     "uvicorn[standard]>=0.32",
 ]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+]

@@ -1,6 +1,8 @@
 {% macro work_card(work, searchable=False) -%}
 <article class="work-card"{% if searchable %} data-work-title="{{ work.title|lower }}"{% endif %}>
   <div class="work-art {{ work.art }}"><span>{{ work.emoji }}</span></div>
-  <div class="work-copy"><strong>{{ work.title }}</strong><span>{{ work.author }}</span><div class="work-stats"><span>◉ {{ work.views }}</span><span>♥ {{ work.likes }}</span></div></div>
+  <div class="work-copy"><strong>{{ work.title }}</strong><span>{{ work.author }}</span><div class="work-stats"><span>◉ {{ work.views }}</span><span>♥ {{ work.likes }}</span></div>
+  {%- if work.status == "hidden" %}<p class="work-flag" role="status">哎呀，这个游戏总是崩溃，先从首页下架啦 🐝💥 快去找黑客松工作人员，我们一起把它修好！</p>
+  {%- elif work.status == "unlisted" %}<p class="work-flag muted">测试中 · 只有链接能打开</p>{% endif %}</div>
 </article>
 {%- endmacro %}

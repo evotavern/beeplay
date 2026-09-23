@@ -642,6 +642,8 @@
     .import-title-label { display: grid; gap: 7px; color: var(--muted); font-size: 12px; font-weight: 800; }
     .import-title-label span { font-weight: 500; }
     .import-title { width: 100%; min-height: 44px; padding: 0 13px; border: 1px solid var(--line); border-radius: 14px; background: var(--white); color: var(--ink); }
+    .work-flag { margin: 8px 0 0; padding: 8px 10px; border-radius: 12px; background: #ffe1d6; color: #8a2b12; font-size: 12px; font-weight: 750; line-height: 1.4; }
+    .work-flag.muted { background: var(--mint); color: var(--muted); }
     .import-row { display: grid; grid-template-columns: 1fr 88px; gap: 9px; }
     .import-art { display: flex; gap: 9px; margin: 0; padding: 0; border: 0; }
     .import-art legend { margin-bottom: 7px; color: var(--muted); font-size: 12px; font-weight: 800; }
@@ -1141,7 +1143,8 @@
   </style>
 </head>
 <body class="mobile-preview{% if view == 'home' %} feed-mode{% endif %}"
-      hx-target="#viewport" hx-swap="innerHTML" hx-push-url="true">
+      hx-target="#viewport" hx-swap="innerHTML" hx-push-url="true"
+      data-load-timeout-s="{{ load_timeout_s }}">
   <div class="app-shell">
     <header class="topbar">
       <button class="brand" data-view-target="home" hx-get="/" aria-label="回到首页">

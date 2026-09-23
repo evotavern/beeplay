@@ -369,6 +369,59 @@
     return !!(session && session.active);
   }
 
+  // --- crash reporting -------------------------------------------------
+  // Every uploaded game carries an inlined reporter (assets/js/game-reporter.js)
+  // that postMessages "loaded" and "error" here. The host adds "start" on
+  // mount and "timeout" when "loaded" never arrives, which is also what a
+  // missing or broken index.html looks like from here. All of it goes to
+  // /api/game-health, which hides games that keep crashing.
+  var loadTimeoutMs = 1000 * (parseInt(document.body.dataset.loadTimeoutS, 10) || 10);
+
+  function reportHealth(play, kind, detail) {
+    try {
+      fetch("/api/game-health", {
+        method: "POST",
+        keepalive: true,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          artifact: play.hash,
+          session: play.healthId,
+          kind: kind,
+          elapsed_ms: Date.now() - play.mountedAt,
+          detail: detail || null
+        })
+      }).catch(function () {});
+    } catch (ignored) {}
+  }
+
+  function newHealthId() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return Date.now().toString(36) + Math.random().toString(36).slice(2);
+  }
+
+  function watchHealth(play) {
+    play.healthId = newHealthId();
+    play.mountedAt = Date.now();
+    play.loaded = false;
+    reportHealth(play, "start");
+    play.loadTimer = setTimeout(function () {
+      if (!play.loaded) reportHealth(play, "timeout", "no load signal after " + loadTimeoutMs + "ms");
+    }, loadTimeoutMs);
+  }
+
+  window.addEventListener("message", function (event) {
+    var play = session;
+    if (!play || !play.frame || event.source !== play.frame.contentWindow) return;
+    var data = event.data || {};
+    if (data.beeplay === "loaded" && !play.loaded) {
+      play.loaded = true;
+      clearTimeout(play.loadTimer);
+      reportHealth(play, "loaded");
+    } else if (data.beeplay === "error") {
+      reportHealth(play, "error", data.detail);
+    }
+  });
+
   function mountGame(card, hash) {
     var frame = document.createElement("iframe");
     frame.src = "/games/" + hash + "/index.html";
@@ -413,6 +466,7 @@
     [].forEach.call(gameHost.querySelectorAll("iframe"), function (frame) {
       frame.remove();
     });
+    clearTimeout(session.loadTimer);
     session = null;
   }
 
@@ -438,6 +492,7 @@
 
     session = { hash: hash, frame: null, card: card, active: false };
     session.frame = mountGame(card, hash);
+    watchHealth(session);
     resumeGame(card, button);
   }
 
