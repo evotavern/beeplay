@@ -110,7 +110,7 @@ uv sync
 uv run uvicorn app.main:app --env-file .env --host 127.0.0.1 --port 8021
 ```
 
-默认 API 为 `https://api.evomap.ai/v1/chat/completions`，模型为 `evomap-gemini-3.1-pro-preview`。
+默认 API 为 `https://api.evomap.ai/v1/chat/completions`，模型为 `evomap-gpt-5.6-sol`。
 `BEEPLAY_EVOMAP_BASE_URL`、`BEEPLAY_EVOMAP_MODEL`、`BEEPLAY_GENERATION_MAX_TOKENS`（默认 8192）、
 `BEEPLAY_GENERATION_TIMEOUT_S`（默认 180）和 `BEEPLAY_GENERATION_WORKERS`（默认 2）均可配置。
 **运行一个 uvicorn 进程，不使用 `--workers`。** 进程内有有界后台线程，网络调用不占用页面请求。

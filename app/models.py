@@ -259,6 +259,8 @@ class GenerationAttempt(Base):
     model: Mapped[str]
     status: Mapped[str]
     http_status: Mapped[int | None] = mapped_column(default=None)
+    # Classified refusal, e.g. model_not_allowed; see generation.rejection_reason.
+    reason: Mapped[str | None] = mapped_column(default=None)
     latency_ms: Mapped[int] = mapped_column(default=0)
     usage: Mapped[str] = mapped_column(Text, default="{}")
     limits: Mapped[str] = mapped_column(Text, default="{}")

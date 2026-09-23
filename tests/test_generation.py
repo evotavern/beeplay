@@ -161,6 +161,39 @@ class GenerationTests(test_http.HttpTestCase):
             self.assertTrue(all(key.disabled for key in session.scalars(select(GenerationKey))))
             self.assertEqual(session.get(Generation, id).error, "keys_unavailable")
 
+    def test_model_refusal_keeps_keys_and_names_the_cause(self):
+        id = self.submit().json()["id"]
+        refused = (403, {}, {"error": {"message": "This token is not allowed to use model: x", "type": "evomap_api_error"}})
+        with patch.object(generation, "request_game", return_value=refused) as request:
+            generation.run_job(id)
+        self.assertEqual(request.call_count, 2)  # each key tried once for this job
+        with db.SessionLocal() as session:
+            self.assertFalse(any(key.disabled for key in session.scalars(select(GenerationKey))))
+            self.assertEqual(session.get(Generation, id).error, "model_unavailable")
+            reasons = set(session.scalars(select(GenerationAttempt.reason)))
+            self.assertEqual(reasons, {"model_not_allowed"})
+        self.assertNotIn("This token", config.EVENTS_LOG.read_text())
+        # The keys still serve the next job once the model is fixed.
+        self.assertEqual(self.run_job(self.submit().json()["id"])["status"], "ready")
+
+    def test_invalid_key_is_disabled_and_the_next_key_used(self):
+        id = self.submit().json()["id"]
+        with patch.object(generation, "request_game", side_effect=[(401, {}, {}), SUCCESS]):
+            generation.run_job(id)
+        with db.SessionLocal() as session:
+            self.assertEqual(sum(key.disabled for key in session.scalars(select(GenerationKey))), 1)
+            self.assertEqual(session.get(Generation, id).status, "ready")
+
+    def test_rejection_reasons(self):
+        reason = generation.rejection_reason
+        self.assertIsNone(reason(200, {}))
+        self.assertEqual(reason(401, {}), "invalid_key")
+        self.assertEqual(reason(402, {}), "quota_exhausted")
+        self.assertEqual(reason(429, {"error": {"code": "insufficient_quota"}}), "quota_exhausted")
+        self.assertEqual(reason(429, {}), "rate_limited")
+        self.assertEqual(reason(403, {"error": "denied"}), "forbidden")
+        self.assertEqual(reason(503, None), "server_error")
+
     def test_connection_error_is_not_automatically_replayed(self):
         id = self.submit().json()["id"]
         with patch.object(generation, "request_game", side_effect=TimeoutError("secret must not reach logs")) as request:

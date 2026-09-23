@@ -29,6 +29,8 @@
   // Keyed by the error codes app/generation.py records on a failed job.
   var errors = {
     keys_unavailable: "生成额度暂时不可用，请稍后重试或联系管理员。",
+    model_unavailable: "生成服务配置有误，请联系管理员。你填写的信息还在。",
+    provider_forbidden: "生成服务拒绝了这次请求，请稍后重新生成。",
     provider_connection_failed: "生成连接中断，请重试。你填写的信息还在。",
     provider_error: "生成服务暂时出错，请稍后重试。",
     invalid_game: "这次没能生成完整的游戏，请重新生成。",

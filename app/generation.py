@@ -180,15 +180,51 @@ def fail(job_id, code):
         session.commit()
 
 
+# Why the provider refused a request. Classified here rather than stored raw:
+# error bodies may echo a key. Only these reasons take a key out of rotation.
+DISABLING = ("invalid_key", "quota_exhausted")
+# Reasons worth trying the job's next key for.
+RETRYABLE = DISABLING + ("rate_limited", "model_not_allowed", "forbidden")
+
+
+def rejection_reason(status, data):
+    if status is None or status == 200:
+        return None
+    error = data.get("error", {}) if isinstance(data, dict) else {}
+    error = error if isinstance(error, dict) else {}
+    code, message = error.get("code"), str(error.get("message") or "").lower()
+    if status == 401:
+        return "invalid_key"
+    if status == 402 or (status == 429 and code in ("insufficient_quota", "quota_exceeded")):
+        return "quota_exhausted"
+    if status == 429:
+        return "rate_limited"
+    if status == 403:
+        # A valid key without access to this model: a deployment setting to fix
+        # (BEEPLAY_EVOMAP_MODEL), not a reason to stop using the key.
+        return "model_not_allowed" if "not allowed to use model" in message else "forbidden"
+    return "server_error" if status >= 500 else "rejected"
+
+
+def pool_exhausted_error(reasons):
+    """The job error once no key is left, naming the most actionable cause."""
+    if "model_not_allowed" in reasons:
+        return "model_unavailable"
+    if "forbidden" in reasons:
+        return "provider_forbidden"
+    return "keys_unavailable"
+
+
 def run_job(job_id):
     with db.SessionLocal() as session:
         job = session.get(Generation, job_id)
         model, prompt = job.model, job.prompt
     excluded = set()
+    reasons = set()
     while True:
         selected = choose_key(excluded)
         if selected is None:
-            fail(job_id, "keys_unavailable")
+            fail(job_id, pool_exhausted_error(reasons))
             return
         key_id, raw_key = selected
         excluded.add(key_id)
@@ -203,25 +239,24 @@ def run_job(job_id):
             # else is a bug and reaches Worker.loop, which logs it.
             error = "provider_connection_failed"
         latency = int((time.monotonic() - start) * 1000)
-        error_data = data.get("error", {}) if isinstance(data, dict) else {}
-        error_code = error_data.get("code") if isinstance(error_data, dict) else None
-        exhausted = status == 402 or (status == 429 and error_code in ("insufficient_quota", "quota_exceeded"))
+        reason = rejection_reason(status, data)
         with LOCK, db.SessionLocal() as session:
             row = session.get(GenerationKey, key_id)
-            if status in (401, 403) or exhausted:
+            if reason in DISABLING:
                 row.disabled = True
-            elif status == 429:
+            elif reason == "rate_limited":
                 row.cooldown_until = utcnow() + timedelta(seconds=cooldown(headers))
             attempt = GenerationAttempt(generation_id=job_id, key_id=key_id, model=model,
                 status=error or ("ok" if status == 200 else "provider_rejected"),
-                http_status=status, latency_ms=latency, usage=json.dumps(safe_usage(data)),
-                limits=json.dumps(safe_limits(headers)))
+                http_status=status, reason=reason, latency_ms=latency,
+                usage=json.dumps(safe_usage(data)), limits=json.dumps(safe_limits(headers)))
             session.add(attempt)
             session.commit()
         events.log_event("generation_provider_attempt", generation_id=job_id, key_id=key_id,
-                         model=model, http_status=status, latency_ms=latency,
+                         model=model, http_status=status, reason=reason, latency_ms=latency,
                          usage=safe_usage(data), limits=safe_limits(headers), error=error)
-        if status in (401, 402, 403, 429):
+        if reason in RETRYABLE:
+            reasons.add(reason)
             continue
         if error or status != 200:
             fail(job_id, error or "provider_error")

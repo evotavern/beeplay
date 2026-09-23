@@ -229,7 +229,7 @@ def cmd_generations(session, args):
         for row in session.scalars(select(GenerationEvent).where(GenerationEvent.generation_id == job.id).order_by(GenerationEvent.id)):
             print(f"{row.at.isoformat()} {row.kind} elapsed_ms={row.elapsed_ms}")
         for row in session.scalars(select(GenerationAttempt).where(GenerationAttempt.generation_id == job.id)):
-            print(f"key={row.key_id} status={row.http_status} latency_ms={row.latency_ms} usage={row.usage} limits={row.limits}")
+            print(f"key={row.key_id} status={row.http_status} reason={row.reason or '-'} latency_ms={row.latency_ms} usage={row.usage} limits={row.limits}")
         return
     jobs = list(session.scalars(select(Generation).order_by(Generation.created_at.desc()).limit(args.limit)))
     for job in jobs:
@@ -259,6 +259,7 @@ def cmd_generation_keys(session, args):
         print(json.dumps({"key_id": key_id, "disabled": row.disabled if row else False,
             "cooldown_until": str(row.cooldown_until) if row and row.cooldown_until else None,
             "requests": len(attempts), "failed": sum(a.status != "ok" for a in attempts),
+            "last_rejection": next((a.reason for a in reversed(attempts) if a.reason), None),
             "observed_total_tokens": sum(t for t in tokens if t is not None),
             "requests_without_token_usage": sum(t is None for t in tokens),
             "remaining_balance": "unknown",

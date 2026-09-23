@@ -39,7 +39,7 @@ CRASH_RATIO = float(os.environ.get("BEEPLAY_CRASH_RATIO", 0.5))
 
 # One-shot generation. Keys are complete bearer values, supplied only by env.
 EVOMAP_BASE_URL = os.environ.get("BEEPLAY_EVOMAP_BASE_URL", "https://api.evomap.ai/v1").rstrip("/")
-EVOMAP_MODEL = os.environ.get("BEEPLAY_EVOMAP_MODEL", "evomap-gemini-3.1-pro-preview")
+EVOMAP_MODEL = os.environ.get("BEEPLAY_EVOMAP_MODEL", "evomap-gpt-5.6-sol")
 _evomap_keys = json.loads(os.environ.get("BEEPLAY_EVOMAP_KEYS", "[]"))
 if not isinstance(_evomap_keys, list) or not all(isinstance(key, str) and key.strip() for key in _evomap_keys):
     raise ValueError("BEEPLAY_EVOMAP_KEYS must be a JSON array of nonempty strings")
