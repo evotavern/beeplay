@@ -49,8 +49,25 @@ sudo -u beeplay uv sync --project "$APP" --frozen --no-dev
 echo "== system config =="
 cp "$APP/deploy/beeplay.service" /etc/systemd/system/beeplay.service
 install -m 755 "$APP/deploy/beeplay-ops" /usr/local/bin/beeplay-ops
-cp "$APP/deploy/nginx.conf" /etc/nginx/sites-available/beeplay
-nginx -t
+[ -f /etc/caddy/Caddyfile ] || { echo "FATAL: run deploy/setup-caddy.sh first" >&2; exit 1; }
+[ -f /etc/caddy/cloudflare.env ] || { echo "FATAL: missing Caddy Cloudflare environment" >&2; exit 1; }
+install -d -m 755 /etc/caddy/sites
+cp -a /etc/caddy/sites/beeplay.caddy "/etc/caddy/sites/beeplay.caddy.$STAMP.prev" 2>/dev/null || true
+install -m 644 "$APP/deploy/beeplay.caddy" /etc/caddy/sites/beeplay.caddy
+set -a
+. /etc/caddy/cloudflare.env
+set +a
+if ! caddy validate --config /etc/caddy/Caddyfile; then
+  if [ -f "/etc/caddy/sites/beeplay.caddy.$STAMP.prev" ]; then
+    mv "/etc/caddy/sites/beeplay.caddy.$STAMP.prev" /etc/caddy/sites/beeplay.caddy
+  else
+    rm -f /etc/caddy/sites/beeplay.caddy
+  fi
+  caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1 || true
+  echo "FATAL: Caddy configuration is invalid; previous BeePlay fragment restored" >&2
+  exit 1
+fi
+rm -f "/etc/caddy/sites/beeplay.caddy.$STAMP.prev"
 systemctl daemon-reload
 
 echo "== migrate =="
@@ -60,7 +77,7 @@ systemctl stop beeplay
 beeplay-ops migrate
 beeplay-ops refresh-reporter
 systemctl start beeplay
-systemctl reload nginx
+systemctl reload caddy
 
 echo "== verify =="
 for i in $(seq 1 20); do
