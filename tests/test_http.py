@@ -13,7 +13,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app import config, db, events, main
-from app.models import HealthEvent, Work
+from app.models import HealthEvent, Work, WorkLike, WorkSave, WorkShare, WorkView
 
 
 def game_zip() -> bytes:
@@ -98,8 +98,70 @@ class HttpTests(unittest.TestCase):
             self.assertEqual(seed.status, "live")
             self.assertIsNotNone(seed.user_id)
 
-    def test_discover_shows_its_empty_state(self) -> None:
-        self.assertIn("发现页正在酿蜜中", self.client.get("/discover").text)
+    def test_discover_uses_real_games_and_zeroed_counts(self) -> None:
+        page = self.client.get("/discover").text
+        self.assertIn("今日咖啡心情", page)
+        self.assertIn("◉ 0", page)
+        self.assertNotIn("8.4K", page)
+
+    def test_social_state_is_real_idempotent_and_identity_aware(self) -> None:
+        with Session(self.engine) as session:
+            work_id = session.scalar(
+                select(Work.id).where(Work.artifact_hash == "af359667cf6a8038")
+            )
+
+        self.assertEqual(
+            self.client.post(f"/api/works/{work_id}/like", json={"active": True}).status_code,
+            401,
+        )
+        self.assertEqual(
+            self.client.post(f"/api/works/{work_id}/save", json={"active": True}).status_code,
+            401,
+        )
+        for _ in range(2):
+            view = self.client.post(
+                f"/api/works/{work_id}/view", json={"event_id": "anonymous-view-1"}
+            )
+            self.assertEqual(view.json(), {"count": 1})
+            share = self.client.post(
+                f"/api/works/{work_id}/share", json={"event_id": "anonymous-share-1"}
+            )
+            self.assertEqual(share.json(), {"count": 1})
+
+        self.claim()
+        self.assertEqual(
+            self.client.post(
+                f"/api/works/{work_id}/like", json={"active": True}
+            ).json(),
+            {"active": True, "count": 1},
+        )
+        self.assertEqual(
+            self.client.post(
+                f"/api/works/{work_id}/save", json={"active": True}
+            ).json(),
+            {"active": True},
+        )
+        self.client.post(
+            f"/api/works/{work_id}/view", json={"event_id": "claimed-view-1"}
+        )
+
+        home = self.client.get("/").text
+        self.assertIn('data-game-action="like" aria-pressed="true"', home)
+        self.assertIn("今日咖啡心情", self.client.get("/profile?tab=likes").text)
+        self.assertIn("今日咖啡心情", self.client.get("/profile?tab=saved").text)
+        self.assertIn("今日咖啡心情", self.client.get("/profile?tab=history").text)
+
+        with Session(self.engine) as session:
+            self.assertEqual(session.query(WorkLike).count(), 1)
+            self.assertEqual(session.query(WorkSave).count(), 1)
+            self.assertEqual(session.query(WorkView).count(), 2)
+            self.assertEqual(session.query(WorkShare).count(), 1)
+
+        self.client.post(f"/api/works/{work_id}/like", json={"active": False})
+        self.client.post(f"/api/works/{work_id}/save", json={"active": False})
+        with Session(self.engine) as session:
+            self.assertEqual(session.query(WorkLike).count(), 0)
+            self.assertEqual(session.query(WorkSave).count(), 0)
 
 
 if __name__ == "__main__":

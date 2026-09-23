@@ -27,10 +27,18 @@ from app.repository import (
     discover_works,
     feed_games,
     is_claimed,
+    liked_works,
     next_free_at,
     profile_works,
+    record_share,
+    record_view,
     resolve_cookie,
+    saved_count,
+    saved_works,
+    set_like,
+    set_save,
     utcnow,
+    viewed_works,
     works_count,
 )
 
@@ -147,32 +155,54 @@ def redirect(request: Request, url: str) -> Response:
     return RedirectResponse(url, status_code=303)
 
 
-def discover_context(session: Session, category: str) -> dict:
-    return {"category": category, "works": discover_works(session, category)}
+def discover_context(session: Session, category: str, user: User | None = None) -> dict:
+    works = discover_works(session, category, user)
+    return {
+        "category": category,
+        "works": works,
+        "featured_work": works[0] if works else None,
+    }
 
 
 def profile_context(session: Session, user: User, tab: str) -> dict:
     if tab not in PROFILE_TABS:
         tab = "works"
+    loaders = {
+        "works": profile_works,
+        "likes": liked_works,
+        "saved": saved_works,
+        "history": viewed_works,
+    }
+    works = loaders[tab](session, user)
     return {
         "tab": tab,
-        "empty_title": PROFILE_TABS[tab],
+        "empty_title": PROFILE_TABS[tab] if not works else None,
         "profile_user": user,
         "works_total": works_count(session, user),
-        "profile_works": profile_works(session, user) if tab == "works" else [],
+        "saved_total": saved_count(session, user),
+        "profile_works": works,
     }
 
 
 @app.get("/", response_class=HTMLResponse)
-def home(request: Request, session: Session = Depends(get_session)) -> HTMLResponse:
-    return render_view(request, "home", games=feed_games(session))
+def home(
+    request: Request,
+    session: Session = Depends(get_session),
+    identity: tuple[User | None, str] = Depends(current_identity),
+) -> HTMLResponse:
+    user, _ = identity
+    return render_view(request, "home", games=feed_games(session, user))
 
 
 @app.get("/discover", response_class=HTMLResponse)
 def discover(
-    request: Request, category: str = "all", session: Session = Depends(get_session)
+    request: Request,
+    category: str = "all",
+    session: Session = Depends(get_session),
+    identity: tuple[User | None, str] = Depends(current_identity),
 ) -> HTMLResponse:
-    return render_view(request, "discover", **discover_context(session, category))
+    user, _ = identity
+    return render_view(request, "discover", **discover_context(session, category, user))
 
 
 @app.get("/create", response_class=HTMLResponse)
@@ -281,10 +311,14 @@ def profile(
 
 @app.get("/partials/works", response_class=HTMLResponse)
 def works_partial(
-    request: Request, category: str = "all", session: Session = Depends(get_session)
+    request: Request,
+    category: str = "all",
+    session: Session = Depends(get_session),
+    identity: tuple[User | None, str] = Depends(current_identity),
 ) -> HTMLResponse:
+    user, _ = identity
     return templates.TemplateResponse(
-        request, "partials/work_grid.html", discover_context(session, category)
+        request, "partials/work_grid.html", discover_context(session, category, user)
     )
 
 
@@ -366,6 +400,82 @@ class HealthReport(BaseModel):
     kind: str
     elapsed_ms: int | None = Field(default=None, ge=0)
     detail: str | None = Field(default=None, max_length=2000)
+
+
+class SocialToggle(BaseModel):
+    active: bool
+
+
+class SocialEvent(BaseModel):
+    event_id: str = Field(min_length=8, max_length=64)
+
+
+def _social_not_found(error: LookupError) -> HTTPException:
+    return HTTPException(status_code=404, detail="这个游戏已经不在公开游戏流中")
+
+
+@app.post("/api/works/{work_id}/like")
+def update_like(
+    work_id: int,
+    change: SocialToggle,
+    session: Session = Depends(get_session),
+    identity: tuple[User | None, str] = Depends(current_identity),
+) -> dict:
+    user, _ = identity
+    if user is None:
+        raise HTTPException(status_code=401, detail="先认领一个身份，再喜欢作品吧")
+    try:
+        active, count = set_like(session, user, work_id, change.active)
+    except LookupError as error:
+        raise _social_not_found(error) from error
+    return {"active": active, "count": count}
+
+
+@app.post("/api/works/{work_id}/save")
+def update_save(
+    work_id: int,
+    change: SocialToggle,
+    session: Session = Depends(get_session),
+    identity: tuple[User | None, str] = Depends(current_identity),
+) -> dict:
+    user, _ = identity
+    if user is None:
+        raise HTTPException(status_code=401, detail="先认领一个身份，再收藏作品吧")
+    try:
+        active = set_save(session, user, work_id, change.active)
+    except LookupError as error:
+        raise _social_not_found(error) from error
+    return {"active": active}
+
+
+@app.post("/api/works/{work_id}/view")
+def create_view(
+    work_id: int,
+    event: SocialEvent,
+    session: Session = Depends(get_session),
+    identity: tuple[User | None, str] = Depends(current_identity),
+) -> dict:
+    user, _ = identity
+    try:
+        count = record_view(session, user, work_id, event.event_id)
+    except LookupError as error:
+        raise _social_not_found(error) from error
+    return {"count": count}
+
+
+@app.post("/api/works/{work_id}/share")
+def create_share(
+    work_id: int,
+    event: SocialEvent,
+    session: Session = Depends(get_session),
+    identity: tuple[User | None, str] = Depends(current_identity),
+) -> dict:
+    user, _ = identity
+    try:
+        count = record_share(session, user, work_id, event.event_id)
+    except LookupError as error:
+        raise _social_not_found(error) from error
+    return {"count": count}
 
 
 @app.post("/api/game-health", status_code=204)

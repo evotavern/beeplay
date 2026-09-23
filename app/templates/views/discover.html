@@ -9,15 +9,20 @@
         <div class="discover-layout">
           <article class="feature-card">
             <div class="feature-content">
-              <span class="chip">HOT · 本周热门</span>
+              <span class="chip">{% if featured_work %}NEW · 最新作品{% else %}等待新作品{% endif %}</span>
+              {% if featured_work %}
               <div>
-                <h2 class="feature-title">蜂巢里的<br />小小冒险</h2>
+                <h2 class="feature-title">{{ featured_work.title }}</h2>
                 <div class="feature-meta">
                   <img class="mini-avatar" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Ccircle cx='40' cy='40' r='40' fill='%23b5d65a'/%3E%3Cpath d='M22 62c3-15 12-23 18-23s15 8 18 23' fill='%23171b1a'/%3E%3Ccircle cx='40' cy='28' r='13' fill='%23f8fbe8'/%3E%3C/svg%3E" alt="" />
-                  <span>Bee Lab · 互动故事</span>
+                  <span>{{ featured_work.author }} · {{ featured_work.category }}</span>
                 </div>
               </div>
-              <div class="feature-bottom"><div class="feature-stats"><span>◉ 8.4K</span><span>♥ 2.1K</span><span>▣ 86</span></div><button class="feature-cta" data-toast="正在打开作品">立即试玩</button></div>
+              <div class="feature-bottom"><div class="feature-stats"><span>◉ {{ featured_work.view_count }}</span><span>♥ {{ featured_work.like_count }}</span></div><button class="feature-cta" hx-get="/?game={{ featured_work.artifact_hash }}" hx-target="#viewport">立即试玩</button></div>
+              {% else %}
+              <div><h2 class="feature-title">蜂巢正在<br />等待第一款游戏</h2></div>
+              <div class="feature-bottom"><div class="feature-stats"><span>真实数据将从第一次试玩开始</span></div></div>
+              {% endif %}
             </div>
           </article>
           <aside class="promo-card">

@@ -17,7 +17,7 @@ GAME = [("index.html", b"<head></head><canvas></canvas>")]
 def owner(slug: str = "bee-2") -> User:
     return User(
         slug=slug, name="小蜜蜂", handle="@b", bio="", avatar_fill="fff",
-        saved_count=0, level=1, xp=0, xp_goal=1, position=0,
+        level=1, xp=0, xp_goal=1, position=0,
     )
 
 

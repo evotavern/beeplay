@@ -32,6 +32,7 @@
     if (event.detail.target.id !== "viewport") return;
     syncChrome();
     window.scrollTo({ top: 0, behavior: "smooth" });
+    setTimeout(scrollToSharedGame, 0);
   });
 
   // A history restore swaps #viewport without firing htmx:afterSwap, and the
@@ -148,6 +149,102 @@
     cards[nextIndex].scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
+  function scrollToSharedGame() {
+    if (currentView() !== "home") return;
+    var artifact = new URLSearchParams(window.location.search).get("game");
+    if (!artifact) return;
+    var card = document.querySelector('.game-card[data-artifact="' + CSS.escape(artifact) + '"]');
+    if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function interactionId() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return Date.now().toString(36) + Math.random().toString(36).slice(2);
+  }
+
+  function socialFetch(workId, action, body) {
+    return fetch("/api/works/" + workId + "/" + action, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }).then(function (response) {
+      if (response.status === 401) {
+        window.location.href = "/claim";
+        throw new Error("identity required");
+      }
+      return response.json().catch(function () { return {}; }).then(function (payload) {
+        if (!response.ok) throw new Error(payload.detail || "操作没有保存，请重试");
+        return payload;
+      });
+    });
+  }
+
+  function renderToggle(button, active) {
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+
+  async function updateToggle(button, card, action, title) {
+    if (button.disabled) return;
+    button.disabled = true;
+    var active = !button.classList.contains("active");
+    try {
+      var result = await socialFetch(card.dataset.gameId, action, { active: active });
+      renderToggle(button, result.active);
+      var counter = button.querySelector("[data-social-count='likes']");
+      if (counter && typeof result.count === "number") counter.textContent = result.count;
+      showToast(result.active
+        ? (action === "like" ? "已喜欢 " : "已收藏 ") + title
+        : (action === "like" ? "已取消喜欢" : "已取消收藏"));
+    } catch (error) {
+      if (error.message !== "identity required") showToast(error.message);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function copyShareUrl(url) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(url);
+      return true;
+    }
+    var field = document.createElement("textarea");
+    field.value = url;
+    field.setAttribute("readonly", "");
+    field.style.position = "fixed";
+    field.style.opacity = "0";
+    document.body.appendChild(field);
+    field.select();
+    var copied = document.execCommand("copy");
+    field.remove();
+    return copied;
+  }
+
+  async function shareGame(button, card, title) {
+    if (button.disabled) return;
+    button.disabled = true;
+    var url = new URL("/", window.location.origin);
+    url.searchParams.set("game", card.dataset.artifact);
+    var completed = false;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: title, text: "来 BeePlay 玩玩 “" + title + "”", url: url.href });
+        completed = true;
+      } else {
+        completed = await copyShareUrl(url.href);
+      }
+      if (!completed) throw new Error("没有复制成功，请重试");
+      var result = await socialFetch(card.dataset.gameId, "share", { event_id: interactionId() });
+      var counter = button.querySelector("[data-social-count='shares']");
+      if (counter && typeof result.count === "number") counter.textContent = result.count;
+      showToast(navigator.share ? "已分享 " + title : "分享链接已复制");
+    } catch (error) {
+      if (error.name !== "AbortError") showToast(error.message || "分享没有完成");
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   document.addEventListener("wheel", function (event) {
     if (!event.target.closest || !event.target.closest(".home-feed")) return;
     if (Math.abs(event.deltaY) < 8 || feedWheelLocked || gamePlaying()) return;
@@ -169,16 +266,11 @@
       var action = gameAction.dataset.gameAction;
       if (action === "play") {
         togglePlay(gameCard, gameAction, title);
+      } else if (action === "like" || action === "save") {
+        updateToggle(gameAction, gameCard, action, title);
+      } else if (action === "share") {
+        shareGame(gameAction, gameCard, title);
       }
-      if (action === "like") {
-        gameAction.classList.toggle("active");
-        showToast(gameAction.classList.contains("active") ? "已喜欢 " + title : "已取消喜欢");
-      }
-      if (action === "save") {
-        gameAction.classList.toggle("active");
-        showToast(gameAction.classList.contains("active") ? "已收藏 " + title : "已取消收藏");
-      }
-      if (action === "share") showToast("分享卡片已准备好：" + title);
       return;
     }
 
@@ -411,6 +503,12 @@
   // the host is just hidden and the feed unlocked.
   var session = null;
 
+  // TODO(completion-contract): After we have ten real games, review how each
+  // one expresses completion and define a dedicated game-to-host hook from
+  // that evidence. Keep completion separate from views and health signals;
+  // do not infer it from load, pause, or exit. Then retrofit those ten games
+  // to the agreed contract.
+
   function gamePlaying() {
     return !!(session && session.active);
   }
@@ -441,14 +539,14 @@
   }
 
   function newHealthId() {
-    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
-    return Date.now().toString(36) + Math.random().toString(36).slice(2);
+    return interactionId();
   }
 
   function watchHealth(play) {
     play.healthId = newHealthId();
     play.mountedAt = Date.now();
     play.loaded = false;
+    socialFetch(play.workId, "view", { event_id: play.healthId }).catch(function () {});
     reportHealth(play, "start");
     play.loadTimer = setTimeout(function () {
       if (!play.loaded) reportHealth(play, "timeout", "no load signal after " + loadTimeoutMs + "ms");
@@ -536,7 +634,7 @@
     if (session && !window.confirm("换一个游戏会结束当前这局，确定吗？")) return;
     endGame();
 
-    session = { hash: hash, frame: null, card: card, active: false };
+    session = { hash: hash, workId: card.dataset.gameId, frame: null, card: card, active: false };
     session.frame = mountGame(card, hash);
     watchHealth(session);
     resumeGame(card, button);
@@ -585,4 +683,5 @@
   });
 
   syncChrome();
+  scrollToSharedGame();
 })();

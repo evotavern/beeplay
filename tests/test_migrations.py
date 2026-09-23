@@ -67,8 +67,15 @@ class MigrationTests(unittest.TestCase):
         self.assert_matches_models()
         with self.engine.connect() as connection:
             rows = connection.execute(text("SELECT artifact_hash, status FROM works")).all()
+            work_columns = {column["name"] for column in inspect(connection).get_columns("works")}
+            social_rows = {
+                table: connection.execute(text(f"SELECT count(*) FROM {table}")).scalar_one()
+                for table in ("work_likes", "work_saves", "work_views", "work_shares")
+            }
         # The fake discover card is gone; the real game is live.
         self.assertEqual(rows, [("af359667cf6a8038", "live")])
+        self.assertTrue({"views", "likes"}.isdisjoint(work_columns))
+        self.assertEqual(social_rows, {table: 0 for table in social_rows})
 
     def test_claiming_era_database_without_alembic_is_adopted(self) -> None:
         # Databases from the claiming branch have users but no alembic_version.
