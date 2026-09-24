@@ -43,7 +43,9 @@ Use inline CSS and vanilla JavaScript, canvas or DOM. No markdown, explanation, 
 external assets, network calls, imports, storage, iframes, forms, or navigation.
 Use procedural shapes/emoji, responsive layout, touch/pointer controls and keyboard where useful.
 Include brief instructions, an immediately playable core loop, score/win/lose feedback and restart.
-Fit a phone viewport, prevent accidental scrolling while playing, make controls large.
+Design for a portrait phone viewport only: the game and its main play area must be taller than wide.
+Never make a landscape/horizontal game, ask the player to rotate, or rely on landscape dimensions.
+Fit the viewport without clipping, prevent accidental scrolling while playing, make controls large.
 Keep code compact: aim for under 4000 output tokens. Implement one mechanic well.
 The surrounding app handles title, cover and publishing. Do not ask questions.
 """
@@ -60,9 +62,15 @@ def fingerprint(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()[:24]
 
 
-def emit(session, job, kind, elapsed_ms=None):
+def emit(session, job, kind, elapsed_ms=None, **fields):
     session.add(GenerationEvent(generation_id=job.id, kind=kind, elapsed_ms=elapsed_ms))
-    events.log_event("generation_" + kind, generation_id=job.id, model=job.model, elapsed_ms=elapsed_ms)
+    events.log_event(
+        "generation_" + kind,
+        generation_id=job.id,
+        model=job.model,
+        elapsed_ms=elapsed_ms,
+        **fields,
+    )
 
 
 def elapsed(job):
@@ -165,6 +173,7 @@ def normalize_html(content):
     match = re.search(r"<head(?:\s[^>]*)?>", content, re.I)
     if not match:
         raise ValueError("missing_head")
+    reject_landscape_layout(content)
     # Policy comes before all model-authored markup. The HTTP sandbox also
     # applies when this document is opened directly, outside the app iframe.
     policy = '<meta http-equiv="Content-Security-Policy" content="' + html_module.escape(CSP, quote=True) + '">'
@@ -172,11 +181,42 @@ def normalize_html(content):
     return policy + inject_reporter(content.encode()).decode()
 
 
+def reject_landscape_layout(content):
+    """Reject explicit landscape play surfaces before they reach playtest.
+
+    This targets declarations that unambiguously describe the whole game or a
+    canvas. Decorative landscape-shaped elements remain valid.
+    """
+    for tag in re.findall(r"<canvas\b[^>]*>", content, re.I):
+        dimensions = {}
+        for name in ("width", "height"):
+            match = re.search(rf"\b{name}\s*=\s*(['\"]?)(\d+(?:\.\d+)?)\1", tag, re.I)
+            if match:
+                dimensions[name] = float(match.group(2))
+        if dimensions.get("height", 0) and dimensions.get("width", 0) > dimensions["height"]:
+            raise ValueError("landscape_layout")
+
+    play_surface = re.compile(
+        r"(?:^|[\s,>+~])(?:html|body|main|canvas|#(?:game|stage|arena)|\.(?:game|stage|arena))(?:$|[\s,:.#\[>+~])",
+        re.I,
+    )
+    for selector, declarations in re.findall(r"([^{}]+)\{([^{}]*)\}", content):
+        if not play_surface.search(selector):
+            continue
+        ratios = re.findall(
+            r"aspect-ratio\s*:\s*(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)",
+            declarations,
+            re.I,
+        )
+        if any(float(height) and float(width) > float(height) for width, height in ratios):
+            raise ValueError("landscape_layout")
+
+
 def fail(job_id, code):
     with db.SessionLocal() as session:
         job = session.get(Generation, job_id)
         job.status, job.error, job.finished_at = FAILED, code, utcnow()
-        emit(session, job, "failed", elapsed(job))
+        emit(session, job, "failed", elapsed(job), error=code)
         session.commit()
 
 
@@ -274,7 +314,10 @@ def run_job(job_id):
         if choice.get("finish_reason") != "stop":
             raise ValueError("incomplete_output")
         document = normalize_html(choice["message"]["content"])
-    except (KeyError, IndexError, TypeError, ValueError):
+    except ValueError as error:
+        fail(job_id, "landscape_game" if str(error) == "landscape_layout" else "invalid_game")
+        return
+    except (KeyError, IndexError, TypeError):
         fail(job_id, "invalid_game")
         return
     with LOCK, db.SessionLocal() as session:
@@ -321,7 +364,7 @@ class Worker:
                 session.commit()
                 return None
             job.status = GENERATING
-            update_timings(job, queue_ms=elapsed(job), max_tokens=config.GENERATION_MAX_TOKENS, prompt_version=1)
+            update_timings(job, queue_ms=elapsed(job), max_tokens=config.GENERATION_MAX_TOKENS, prompt_version=2)
             emit(session, job, "started", elapsed(job))
             session.commit()
             return job.id
