@@ -26,12 +26,32 @@ _REPORTER = (
 )
 
 
+# Only in games generated for head control; see assets/js/head-api.js.
+HEAD_MARKER = b"<!--beeplay-head-api-->"
+HEAD_API = (
+    HEAD_MARKER
+    + b"<script>"
+    + (BASE_DIR / "assets" / "js" / "head-api.js").read_bytes()
+    + b"</script>"
+)
+
+
 class GameImportError(ValueError):
     pass
 
 
 def reporter_is_current(html: bytes) -> bool:
-    return _REPORTER in html
+    """The reporter, and the head API if the game has one, are this release's."""
+    return _REPORTER in html and (HEAD_MARKER not in html or HEAD_API in html)
+
+
+def _swap(html: bytes, marker: bytes, current: bytes) -> bytes | None:
+    """Replace an older copy of a script inlined after `marker`, if there is one."""
+    start = html.find(marker)
+    end = html.find(b"</script>", start) if start >= 0 else -1
+    if end < 0:
+        return None
+    return html[:start] + current + html[end + len(b"</script>") :]
 
 
 def inject_reporter(html: bytes) -> bytes:
@@ -39,20 +59,31 @@ def inject_reporter(html: bytes) -> bytes:
 
     Works on bytes so a game in any encoding survives untouched. Idempotent,
     because an operator may re-import a bundle copied from the games store,
-    and an older reporter is swapped for the current one, which is how
-    `beeplay-ops refresh-reporter` brings installed games up to date.
+    and an older reporter (or head API) is swapped for the current one, which
+    is how `beeplay-ops refresh-reporter` brings installed games up to date.
     """
     if reporter_is_current(html):
         return html
-    start = html.find(REPORTER_MARKER)
-    end = html.find(b"</script>", start) if start >= 0 else -1
-    if end >= 0:
-        return html[:start] + _REPORTER + html[end + len(b"</script>") :]
+    if HEAD_MARKER in html and HEAD_API not in html:
+        html = _swap(html, HEAD_MARKER, HEAD_API) or html
+    if _REPORTER in html:
+        return html
+    swapped = _swap(html, REPORTER_MARKER, _REPORTER)
+    if swapped is not None:
+        return swapped
     for tag in (rb"<head(?:\s[^>]*)?>", rb"<html(?:\s[^>]*)?>"):
         match = re.search(tag, html, re.IGNORECASE)
         if match:
             return html[: match.end()] + _REPORTER + html[match.end() :]
     return _REPORTER + html
+
+
+def inject_head_api(html: bytes) -> bytes:
+    """Put the head API right after the reporter, ahead of the game's scripts."""
+    html = inject_reporter(html)
+    if HEAD_MARKER in html:
+        return html
+    return html.replace(_REPORTER, _REPORTER + HEAD_API, 1)
 
 
 def _checked_paths(entries: list[tuple[str, bytes]]) -> tuple[list[tuple[PurePosixPath, bytes]], bool]:

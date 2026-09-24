@@ -9,6 +9,7 @@
                 <iframe class="game-frame" {% if loop.first %}src="/games/{{ game.artifact_hash }}/index.html"{% else %}data-src="/games/{{ game.artifact_hash }}/index.html"{% endif %} sandbox="allow-scripts" allow="autoplay" title="{{ title }}"></iframe>
               </div>
               <div class="game-loading" aria-hidden="true"><span>{{ game.emoji }}</span><small>正在进入 {{ title }}</small></div>
+              <button class="game-head" type="button" data-head-toggle aria-pressed="false" hidden>📷 用头玩</button>
               <button class="game-mute" type="button" data-game-mute aria-pressed="false" aria-label="静音"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path class="sound-on" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path class="sound-off" d="m16 9 6 6m0-6-6 6"/></svg></button>
               <button class="game-expand" type="button" data-game-expand aria-label="全屏玩 {{ title }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
               <button class="game-collapse" type="button" data-game-collapse aria-label="退出全屏，回到游戏流"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>

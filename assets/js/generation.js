@@ -14,8 +14,9 @@
   var saveTimer;
   var saveChain = Promise.resolve();
 
-  // Playtest overlay.
-  var overlay, frame, loadTimer;
+  // Playtest overlay. The frame sits in a stage, so a head game's camera
+  // picture can go behind it.
+  var overlay, stage, frame, loadTimer;
   var previewJob = null;
   var previewStart = 0;
   // The playtest_loaded signal; publish waits for it, but only briefly.
@@ -137,6 +138,7 @@
   function hydrate() {
     if (!root()) return;
     el("ideaInput").value = job ? job.prompt : (storage("beeplay-prompt") || "");
+    el("ideaHead").checked = job ? job.controls === "head" : !!storage("beeplay-head");
     if (job) fillDetails(storage("beeplay-details-" + job.id) || job.details);
     render();
   }
@@ -146,6 +148,7 @@
     var status = job && job.status;
     el("ideaSubmit").disabled = !loaded || starting || !!job || !configured;
     el("ideaInput").disabled = !!job || starting;
+    el("ideaHead").disabled = !!job || starting;
     el("generationDetails").hidden = !job;
     el("generationInspiration").hidden = !!job;
     el("generationProgress").hidden = !active();
@@ -213,6 +216,7 @@
       message("先写下一句想法吧");
       return;
     }
+    var controls = el("ideaHead").checked ? "head" : "touch";
     var previous = retry ? readDetails() : null;
     starting = true;
     render();
@@ -220,9 +224,10 @@
     // Reused until the server accepts it, so a retried POST cannot start two jobs.
     requestId = requestId || crypto.randomUUID();
     try {
-      job = await api("", "POST", {prompt: prompt, request_id: requestId});
+      job = await api("", "POST", {prompt: prompt, request_id: requestId, controls: controls});
       requestId = null;
       storage("beeplay-prompt", prompt);
+      storage("beeplay-head", controls === "head");
       hydrate();
       if (previous) {
         fillDetails(previous);
@@ -258,10 +263,13 @@
       '<div class="generation-playtest-bar">' +
         '<button class="generation-playtest-close" type="button">← 返回修改信息</button>' +
         "<strong>亲自试玩</strong>" +
+        '<button class="generation-head" type="button" data-head-toggle aria-pressed="false" hidden>📷 用头玩</button>' +
         '<button class="generation-publish" type="button" disabled>发布到游戏流 →</button>' +
       "</div>" +
-      '<p class="generation-playtest-message" role="status">正在加载游戏…</p>';
+      '<p class="generation-playtest-message" role="status">正在加载游戏…</p>' +
+      '<div class="generation-playtest-stage"></div>';
     document.body.appendChild(overlay);
+    stage = overlay.querySelector(".generation-playtest-stage");
     overlay.querySelector(".generation-playtest-close").onclick = closePreview;
     overlay.querySelector(".generation-publish").onclick = publish;
   }
@@ -290,6 +298,7 @@
     previewStart = performance.now();
     loadedSignal = null;
     overlay.querySelector(".generation-publish").disabled = true;
+    overlay.querySelector(".generation-head").hidden = true;
     previewMessage("正在加载游戏…");
 
     frame = document.createElement("iframe");
@@ -298,7 +307,7 @@
     frame.setAttribute("allow", "autoplay");
     frame.referrerPolicy = "no-referrer";
     frame.src = job.preview_url;
-    overlay.appendChild(frame);
+    stage.appendChild(frame);
 
     signal("playtest_opened", 0).catch(function () {});
     loadTimer = setTimeout(function () {
@@ -314,6 +323,7 @@
     if (!overlay || overlay.hidden) return;
     signal("playtest_closed", performance.now() - previewStart, true).catch(function () {});
     clearTimeout(loadTimer);
+    if (window.BeeHead) window.BeeHead.detach();
     if (frame) frame.remove();
     frame = null;
     previewJob = null;
@@ -361,6 +371,9 @@
     } else if (kind === "error") {
       signal("playtest_error", performance.now() - previewStart).catch(function () {});
       previewProblem("游戏报告了运行错误。建议返回检查，或重新创作。");
+    } else if (kind === "head" && window.BeeHead) {
+      overlay.querySelector(".generation-head").hidden = false;
+      window.BeeHead.attach(stage, frame, "creation");
     }
   });
 

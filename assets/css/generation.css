@@ -91,12 +91,20 @@
   cursor: pointer;
 }
 .generation-playtest-bar button:disabled { opacity: 0.5; cursor: wait; }
-.generation-playtest iframe {
+.generation-playtest-stage {
+  position: relative;
   width: min(100%, 480px);
   flex: 1;
   min-height: 0;
-  border: 0;
+  overflow: hidden;
   border-radius: 16px;
+  background: var(--white);
+}
+.generation-playtest-stage iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
   background: var(--white);
 }
 .generation-playtest p { max-width: 620px; margin: 0; font-size: 13px; line-height: 1.5; color: #eee; }
@@ -109,7 +117,7 @@
     padding: 10px 8px;
     padding-bottom: max(10px, env(safe-area-inset-bottom));
   }
-  .generation-playtest iframe { border-radius: 8px; }
+  .generation-playtest-stage { border-radius: 8px; }
   .generation-playtest-bar { justify-content: space-between; }
   .generation-playtest-bar strong { display: none; }
 }

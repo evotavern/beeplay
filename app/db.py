@@ -47,7 +47,7 @@ def get_session() -> Iterator[Session]:
 
 
 MIGRATIONS_DIR = BASE_DIR / "migrations"
-HEAD_REVISION = "0009"
+HEAD_REVISION = "0010"
 
 
 def _stamp_unversioned(connection) -> str | None:

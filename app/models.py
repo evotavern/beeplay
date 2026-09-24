@@ -282,6 +282,8 @@ class Generation(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     prompt: Mapped[str] = mapped_column(Text)
     model: Mapped[str]
+    # "touch", or "head": played with head movements through the camera.
+    controls: Mapped[str] = mapped_column(default="touch", server_default="touch")
     status: Mapped[str] = mapped_column(default="queued", index=True)
     details: Mapped[str] = mapped_column(Text, default="{}")
     html: Mapped[str | None] = mapped_column(Text, default=None)

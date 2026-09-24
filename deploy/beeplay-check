@@ -57,6 +57,7 @@ expected_type() {  # path -> part of the content type it must have, or empty
     *.ico) echo icon ;;
     *.woff2) echo font/woff2 ;;
     *.json) echo json ;;
+    *.wasm) echo application/wasm ;;
   esac
 }
 

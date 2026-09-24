@@ -1355,6 +1355,7 @@
   </style>
   <link rel="stylesheet" href="{{ asset('css/generation.css') }}">
   <link rel="stylesheet" href="{{ asset('css/account.css') }}">
+  <link rel="stylesheet" href="{{ asset('css/head.css') }}">
 </head>
 <body class="mobile-preview{% if view == 'home' %} feed-mode{% endif %}"
       hx-target="#viewport" hx-swap="innerHTML" hx-push-url="true"
@@ -1470,6 +1471,7 @@
 
   <script src="{{ asset('js/page-reporter.js') }}"></script>
   <script src="{{ asset('vendor/htmx.min.js') }}"></script>
+  <script src="{{ asset('js/head-camera.js') }}" data-bundle="{{ asset('vendor/mediapipe/vision_bundle.js') }}" data-loader="{{ asset('vendor/mediapipe/vision_wasm_internal.js') }}" data-wasm="{{ asset('vendor/mediapipe/vision_wasm_internal.wasm') }}" data-model="{{ asset('vendor/mediapipe/face_landmarker.task') }}"></script>
   <script src="{{ asset('js/app.js') }}"></script>
   <script src="{{ asset('js/generation.js') }}"></script>
   <script src="{{ asset('js/account.js') }}"></script>
