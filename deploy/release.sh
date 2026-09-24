@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Release Beeplay on the server, from a checkout of this repository:
+# Release Beeplay on the server, from an export of one commit:
 #
 #   sudo bash deploy/release.sh             # release
 #   sudo bash deploy/release.sh --dry-run   # the checks only; nothing live changes
 #
-# deploy/push.sh does the copy and runs this for you from a laptop.
+# beeplay-release runs this on a commit it downloaded from GitHub, when
+# deploy/push.sh on a laptop asks it to; run it by hand only in an emergency.
 #
 # Before anything live is touched, the new code migrates a copy of the live
 # database and its Caddy site is validated beside the others; either failing
@@ -20,7 +21,8 @@ NEXT=/srv/beeplay.next
 STATE=/var/lib/beeplay
 DB=$STATE/beeplay.db
 BACKUPS=/var/backups/beeplay
-STAMP=$(date +%Y%m%d-%H%M%S)
+# beeplay-release passes its stamp so a rollback can find this backup.
+STAMP=${BEEPLAY_RELEASE_STAMP:-$(date +%Y%m%d-%H%M%S)}
 BACKUP=$BACKUPS/beeplay-$STAMP.db
 
 DRY_RUN=0
@@ -191,7 +193,9 @@ if ! validate_caddy "$NEXT/caddy/Caddyfile" >"$NEXT/caddy.log" 2>&1; then
 fi
 echo "caddy: the new site config is valid"
 bash -n "$NEXT/deploy/beeplay-check"
-python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' "$NEXT/deploy/beeplay-notify"
+for tool in beeplay-notify beeplay-release; do
+  python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' "$NEXT/deploy/$tool"
+done
 
 if [ "$DRY_RUN" = 1 ]; then
   echo "== live site, as the new check sees it =="
@@ -218,6 +222,9 @@ cp "$APP/deploy/beeplay.service" "$APP/deploy/beeplay-check.service" "$APP/deplo
 install -m 755 "$APP/deploy/beeplay-ops" /usr/local/bin/beeplay-ops
 install -m 755 "$APP/deploy/beeplay-check" /usr/local/bin/beeplay-check
 install -m 755 "$APP/deploy/beeplay-notify" /usr/local/bin/beeplay-notify
+# install replaces the file rather than rewriting it, so the beeplay-release
+# that is running this release is not disturbed.
+install -m 755 "$APP/deploy/beeplay-release" /usr/local/bin/beeplay-release
 install -d -m 755 /etc/caddy/sites
 cp -a /etc/caddy/sites/beeplay.caddy "/etc/caddy/sites/beeplay.caddy.$STAMP.prev" 2>/dev/null || true
 install -m 644 "$APP/deploy/beeplay.caddy" /etc/caddy/sites/beeplay.caddy

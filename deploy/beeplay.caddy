@@ -42,6 +42,15 @@ beeplay.top {
 		file_server
 	}
 
+	# What is live: the commit beeplay-release stamped into this release.
+	# Never cached, since it must answer for right now.
+	handle /version {
+		root * /srv/beeplay
+		rewrite * /version.json
+		header Cache-Control "no-store"
+		file_server
+	}
+
 	handle {
 		reverse_proxy 127.0.0.1:8000
 	}
