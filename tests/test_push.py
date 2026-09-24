@@ -17,7 +17,7 @@ LIVE = "a" * 40
 STATUS = {"live": LIVE, "live_known_by": "version.json", "pr": 6, "released_at": "2026-09-24T14:49:35+08:00",
           "previous": "b" * 40, "lock": None, "last": {"action": "release", "pr": 6}, "database": "0009",
           "since_release": {"client_error": 0, "server_error": 0, "health_fail": 0, "play_ok": 22},
-          "deploy_key": True}
+          "github": True}
 
 
 def pr(**changes) -> "push.Candidate":
@@ -61,6 +61,10 @@ class StopTests(unittest.TestCase):
         self.assertIn("cannot tell what is live (unknown: no commit on main matches the live files)",
                       self.stops(facts(status=status)))
 
+    def test_a_first_install_with_nothing_live_does_not_stop(self):
+        status = dict(STATUS, live=None, live_known_by="nothing live yet (first install)")
+        self.assertEqual(self.stops(facts(status=status)), [])
+
     def test_a_release_already_running_stops(self):
         status = dict(STATUS, lock="release abc123 since 15:02:11 (pid 42)")
         self.assertIn("another release is running: release abc123 since 15:02:11 (pid 42)",
@@ -82,9 +86,9 @@ class StopTests(unittest.TestCase):
         self.assertIn("PR #8 is a draft", stops)
         self.assertIn("PR #8 conflicts with main", stops)
 
-    def test_without_the_deploy_key_it_stops(self):
-        self.assertIn("the server cannot download from GitHub yet: run deploy/push.sh setup",
-                      self.stops(facts(status=dict(STATUS, deploy_key=False))))
+    def test_a_server_that_cannot_read_github_stops(self):
+        self.assertIn("the server cannot read the repository on GitHub (it has to be public)",
+                      self.stops(facts(status=dict(STATUS, github=False))))
 
 
 class WarningTests(unittest.TestCase):

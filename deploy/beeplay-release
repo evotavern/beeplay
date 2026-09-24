@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Installed as /usr/local/bin/beeplay-release: the only way code reaches
 /srv/beeplay. deploy/push.sh on a laptop calls it over ssh. It downloads the
-commit straight from GitHub with a read-only deploy key, so the laptop's own
-connection to GitHub is not in the way, and runs that commit's
-deploy/release.sh on it, one release at a time.
+commit straight from GitHub, so the laptop's own connection to GitHub is not
+in the way, and runs that commit's deploy/release.sh on it, one release at a
+time. The repository is public: reading it needs no credentials here.
 
     beeplay-release status                what is live, as JSON
     beeplay-release release SHA [--pr N] [--by WHO] [--notes-b64 TEXT] [--dry-run]
     beeplay-release rollback [--by WHO]   the previous release back
-    beeplay-release setup                 once: the deploy key; prints its public half
+    beeplay-release setup                 once: the local copy of the repository
     beeplay-release check-access          can this server read the repository?
 
 A release must be on main and must contain the commit that is live, so it
@@ -31,17 +31,14 @@ import sqlite3
 import subprocess
 import sys
 import time
-import urllib.request
 from pathlib import Path
 
-REPO = "git@github.com:evotavern/beeplay.git"
+REPO = "https://github.com/evotavern/beeplay.git"
 APP = Path("/srv/beeplay")
 PREV = Path("/srv/beeplay.prev")
 ROOT = Path("/var/lib/beeplay-release")
 MIRROR = ROOT / "mirror.git"
 RELEASES = ROOT / "releases"
-KNOWN_HOSTS = ROOT / "known_hosts"
-KEY = Path("/root/.ssh/beeplay_deploy")
 LOCK = Path("/run/lock/beeplay-release.lock")
 LOG = Path("/var/lib/beeplay/logs/releases.jsonl")
 EVENTS = Path("/var/lib/beeplay/logs/events.jsonl")
@@ -73,14 +70,25 @@ def is_ancestor(commit: str, of: str) -> bool:
                           capture_output=True).returncode == 0
 
 
-def git(*args: str, cwd: Path | None = None, check: bool = True) -> str:
-    env = {**os.environ, "GIT_SSH_COMMAND": (
-        f"ssh -i {KEY} -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=15"
-        f" -o StrictHostKeyChecking=yes -o UserKnownHostsFile={KNOWN_HOSTS}")}
-    result = subprocess.run(["git", *args], cwd=cwd, env=env, capture_output=True, text=True)
+def git(*args: str, cwd: Path | None = None, check: bool = True, timeout: int = 300) -> str:
+    # Never ask for a password: if the repository stops being public, fail.
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    try:
+        result = subprocess.run(["git", *args], cwd=cwd, env=env, capture_output=True, text=True,
+                                timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise SystemExit(f"git {args[0]}: no answer within {timeout}s")
     if check and result.returncode != 0:
         raise SystemExit(f"git {' '.join(args)}: {result.stderr.strip()}")
     return result.stdout.strip()
+
+
+def github_reachable() -> bool:
+    try:
+        git("ls-remote", REPO, "refs/heads/main", timeout=20)
+        return True
+    except SystemExit:
+        return False
 
 
 # --- what is live -------------------------------------------------------
@@ -142,10 +150,13 @@ def live_commit() -> tuple[str | None, str]:
     version = read_version(APP)
     if version and version.get("commit"):
         return version["commit"], "version.json"
+    if not (APP / "app").is_dir():
+        return None, "nothing live yet (first install)"
     # Released before releases were stamped: find the commit by its files.
-    if not KEY.exists():
-        return None, "unknown: no version.json, and no deploy key to compare commits"
-    fetch()
+    try:
+        fetch()
+    except SystemExit as error:
+        return None, f"unknown: no version.json, and GitHub could not be read ({error})"
     history = git("rev-list", "--first-parent", "--max-count=60", "refs/heads/main", cwd=MIRROR).split()
     found = whats_live(APP, history)
     return (found, "matched by its files") if found else (None, "unknown: no commit on main matches the live files")
@@ -247,16 +258,8 @@ def fetch(pr: int | None = None) -> None:
 
 
 def setup() -> None:
-    ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
-    KEY.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if not KEY.exists():
-        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C",
-                        f"beeplay-release@{os.uname().nodename}", "-f", str(KEY)], check=True)
-    # GitHub's host keys from its API, over TLS, not from a first connection.
-    with urllib.request.urlopen("https://api.github.com/meta", timeout=20) as response:
-        keys = json.load(response)["ssh_keys"]
-    KNOWN_HOSTS.write_text("".join(f"github.com {key}\n" for key in keys))
-    print(Path(f"{KEY}.pub").read_text().strip())
+    fetch()
+    print(git("rev-parse", "refs/heads/main", cwd=MIRROR))
 
 
 def check_access() -> None:
@@ -294,15 +297,16 @@ def release(args) -> int:
         commit = git("rev-parse", "--verify", f"{args.sha}^{{commit}}", cwd=MIRROR)
         on_main = is_ancestor(commit, "refs/heads/main")
         live, how = live_commit()
-        keeps_live = live is not None and is_ancestor(live, commit)
+        first = live is None and how.startswith("nothing live")
+        keeps_live = first or (live is not None and is_ancestor(live, commit))
         say(f"live: {live[:7] if live else 'unknown'} ({how})")
         if not args.dry_run:
             if not on_main:
                 raise SystemExit(f"refused: {commit[:7]} is not on main. Merge it first.")
-            if live is None:
+            if live is None and not first:
                 raise SystemExit(f"refused: cannot tell what is live ({how}).")
             if not keeps_live:
-                raise SystemExit(f"refused: {commit[:7]} does not contain the live {live[:7]}; "
+                raise SystemExit(f"refused: {commit[:7]} does not contain the live {str(live)[:7]}; "
                                  "releasing it would take back what players have.")
         elif live is not None and not keeps_live:
             say(f"note: {commit[:7]} does not contain the live {live[:7]}; a real release would refuse")
@@ -398,7 +402,7 @@ def status(args) -> int:
         "previous": (read_version(PREV) or {}).get("commit"),
         "lock": lock_holder(), "last": last, "database": db_version(),
         "since_release": errors_since(version.get("released_at") or (last or {}).get("at")),
-        "deploy_key": KEY.exists(),
+        "github": github_reachable(),
     }))
     return 0
 

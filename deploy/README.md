@@ -32,7 +32,7 @@ deploy/push.sh 12             # briefing, then type "ship": merges PR #12 and re
 deploy/push.sh --dry-run 12   # the briefing and the server's checks; nothing changes
 deploy/push.sh main           # releases main as it is, e.g. after merging on GitHub
 deploy/push.sh rollback       # the previous release back, and a revert PR
-deploy/push.sh setup          # once per server: beeplay-release and its deploy key
+deploy/push.sh setup          # once per server: installs beeplay-release
 ```
 
 `push.sh` first prints a one-screen briefing: what ships, what is live (and
@@ -48,7 +48,7 @@ since the last release.
     players have;
   - another release is running;
   - what is live can't be told;
-  - the server has no deploy key yet.
+  - the server cannot read the repository on GitHub.
 - **Warnings** you acknowledge by typing `ship`: migrations, dependency or
   server changes, a large diff, overlapping PRs, unpushed work elsewhere, errors
   in prod, or a rollback whose revert has not been merged.
@@ -58,8 +58,9 @@ prepare pull requests and say when one is ready. `push.sh` then merges the PR
 with a merge commit (never squash: the checks follow commit ids) and asks the
 server to release exactly that commit.
 
-On the server, `beeplay-release` downloads the commit straight from GitHub with
-a read-only deploy key, so the laptop's connection to GitHub is not in the way.
+On the server, `beeplay-release` downloads the commit straight from GitHub,
+without credentials since the repository is public, so the laptop's connection
+to GitHub is not in the way.
 It refuses anything that is not on `main` or does not contain the live commit,
 one release at a time, writes `version.json` into the release (served, uncached,
 at https://beeplay.top/version), logs to `/var/lib/beeplay/logs/releases.jsonl`,
@@ -122,9 +123,10 @@ sudo mkdir -p /srv/beeplay && sudo chown beeplay:beeplay /srv/beeplay
 ```
 
 Install Caddy with the Cloudflare DNS module required by the shared
-Moonanswer configuration, create `/etc/caddy/cloudflare.env`, then run
-`deploy/push.sh` followed by `deploy/setup-caddy.sh`. Enable `beeplay` and
-open TCP ports 80 and 443 in the cloud firewall.
+Moonanswer configuration, create `/etc/caddy/cloudflare.env`, copy a checkout
+to the server and run `deploy/setup-caddy.sh` from it. Then, from a laptop,
+`deploy/push.sh setup` and `deploy/push.sh main`. Enable `beeplay` and open
+TCP ports 80 and 443 in the cloud firewall.
 
 ## State
 

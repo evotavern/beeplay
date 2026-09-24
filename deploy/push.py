@@ -5,7 +5,7 @@
     deploy/push.sh --dry-run 12   the briefing and the server's checks; nothing merged or changed
     deploy/push.sh main           releases main as it is, e.g. after a PR merged on GitHub
     deploy/push.sh rollback       puts the previous release back and opens a revert PR
-    deploy/push.sh setup          once per server: installs beeplay-release, adds its deploy key
+    deploy/push.sh setup          once per server: installs beeplay-release
 
 The server downloads what it releases straight from GitHub (beeplay-release),
 so this laptop only needs GitHub for the pull request itself. "ship" is read
@@ -215,11 +215,11 @@ def assess(facts: Facts) -> tuple[list[str], list[str]]:
     """Hard stops (no override) and warnings (acknowledged by typing ship)."""
     c, s = facts.candidate, facts.status
     stops, warnings = [], []
-    if not s.get("deploy_key"):
-        stops.append("the server cannot download from GitHub yet: run deploy/push.sh setup")
+    if not s.get("github"):
+        stops.append("the server cannot read the repository on GitHub (it has to be public)")
     if s.get("lock"):
         stops.append(f"another release is running: {s['lock']}")
-    if not s.get("live"):
+    if not s.get("live") and not str(s.get("live_known_by", "")).startswith("nothing live"):
         stops.append(f"cannot tell what is live ({s.get('live_known_by', '?')})")
     elif facts.live_in_main is False:
         stops.append(f"main does not contain the live {s['live'][:7]}: releasing would take back what "
@@ -420,9 +420,9 @@ def rollback() -> int:
         node = gh("pr", "view", str(pr), "-R", REPO, "--json", "id", "--jq", ".id").strip()
         mutation = ("mutation($id: ID!) { revertPullRequest(input: {pullRequestId: $id}) "
                     "{ revertPullRequest { url } } }")
-        try:
-            url = gh("api", "graphql", "-f", f"query={mutation}", "-f", f"id={node}",
-                     "--jq", ".data.revertPullRequest.revertPullRequest.url").strip()
+        try:  # not retried: a lost answer must not open a second revert
+            url = run(["gh", "api", "graphql", "-f", f"query={mutation}", "-f", f"id={node}",
+                       "--jq", ".data.revertPullRequest.revertPullRequest.url"], timeout=60).strip()
             print(f"main still has PR #{pr}: its revert is {url}. Ship that, or a fix.")
         except Refused:
             print(f"main still has PR #{pr}: open its revert on GitHub (Revert button), then ship it.")
@@ -430,19 +430,14 @@ def rollback() -> int:
 
 
 def setup() -> int:
+    """Installs beeplay-release, which later releases keep up to date, and
+    gives it its copy of the repository. Safe to run again."""
     print("installing beeplay-release on the server…")
     run(["scp", "-q", str(ROOT / "deploy" / "beeplay-release"), f"{HOST}:/tmp/beeplay-release.new"])
     run(["ssh", HOST, "install -m 755 /tmp/beeplay-release.new /usr/local/bin/beeplay-release"
                       " && rm /tmp/beeplay-release.new"])
-    public = server("setup").strip().splitlines()[-1]
-    keys = gh_json("api", f"repos/{REPO}/keys") or []
-    if any(public.split()[1] in key.get("key", "") for key in keys):
-        print("the deploy key is already on GitHub")
-    else:
-        gh("api", f"repos/{REPO}/keys", "-f", f"title=beeplay-release on {HOST} (read-only)",
-           "-f", f"key={public}", "-F", "read_only=true")
-        print("added a read-only deploy key to GitHub")
-    print(f"the server reads main at {server('check-access').strip()[:7]}: ready")
+    main = server("setup", timeout=300).strip().splitlines()[-1]
+    print(f"the server reads main from GitHub at {main[:7]}: ready")
     return 0
 
 
