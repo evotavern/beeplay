@@ -36,6 +36,7 @@
     provider_connection_failed: "生成连接中断，请重试。你填写的信息还在。",
     provider_error: "生成服务暂时出错，请稍后重试。",
     invalid_game: "这次没能生成完整的游戏，请重新生成。",
+    landscape_game: "这次生成的游戏不是竖屏布局，请重新生成。",
     interrupted: "服务重启中断了这次生成，请重新生成。",
     internal_error: "生成出了点问题，请重新生成。"
   };

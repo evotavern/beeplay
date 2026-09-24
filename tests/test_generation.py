@@ -13,6 +13,7 @@ from app.models import Generation, GenerationAttempt, GenerationEvent, Generatio
 import test_http
 
 HTML = '<!doctype html><html><head><title>Bee</title></head><body><button onclick="this.textContent=\'1\'">Play</button><script>let score = 0;</script></body></html>'
+LANDSCAPE_HTML = '<!doctype html><html><head><style>#game{aspect-ratio:9/5}canvas{width:100%;height:100%}</style></head><body><div id="game"><canvas width="900" height="500"></canvas></div></body></html>'
 DETAILS = dict(title="Honey Hop", category="relax", emoji="🐝", art="art-one", description="Collect honey")
 SUCCESS = (200, {"x-ratelimit-remaining-tokens": "1000"}, {"choices": [{"finish_reason": "stop", "message": {"content": HTML}}], "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}})
 
@@ -216,6 +217,23 @@ class GenerationTests(test_http.HttpTestCase):
         result = self.run_job(id, (200, {}, {"choices": [{"finish_reason": "length", "message": {"content": HTML}}]}))
         self.assertEqual(result["error"], "invalid_game")
         self.assertEqual(self.client.get(f"/api/generations/{id}/preview").status_code, 409)
+
+    def test_explicit_landscape_game_never_becomes_playable(self):
+        id = self.submit().json()["id"]
+        response = (200, {}, {"choices": [{"finish_reason": "stop", "message": {"content": LANDSCAPE_HTML}}]})
+        result = self.run_job(id, response)
+        self.assertEqual(result["error"], "landscape_game")
+        self.assertEqual(self.client.get(f"/api/generations/{id}/preview").status_code, 409)
+        self.assertIn('"error": "landscape_game"', config.EVENTS_LOG.read_text())
+
+    def test_portrait_contract_is_explicit_and_versioned(self):
+        self.assertIn("portrait phone viewport only", generation.SYSTEM_PROMPT)
+        self.assertIn("Never make a landscape/horizontal game", generation.SYSTEM_PROMPT)
+        id = self.submit().json()["id"]
+        worker = generation.Worker()
+        self.assertEqual(worker.claim(), id)
+        with db.SessionLocal() as session:
+            self.assertEqual(json.loads(session.get(Generation, id).timings)["prompt_version"], 2)
 
     def test_real_worker_picks_queued_job_and_preserves_early_details_timing(self):
         id = self.submit().json()["id"]
