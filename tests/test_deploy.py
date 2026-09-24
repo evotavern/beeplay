@@ -38,6 +38,13 @@ class CaddyConfigTests(unittest.TestCase):
         self.assertIn('Referrer-Policy "strict-origin-when-cross-origin"', self.config)
         self.assertNotIn("Strict-Transport-Security", self.config)
 
+    def test_long_caching_is_only_for_successful_responses(self) -> None:
+        # A 403 cached for a week kept phones broken after the 2026-09-24 fix.
+        blocks = self.config.split("header Cache-Control")[1:]
+        self.assertEqual(len(blocks), 3)  # /assets/, /games/, /avatars/
+        for block in blocks:
+            self.assertIn("match status 2xx 304", block[: block.index("}")])
+
 
 class DeploymentScriptTests(unittest.TestCase):
     def test_production_environment_defaults_to_secure_canonical_url(self) -> None:
@@ -64,13 +71,45 @@ class DeploymentScriptTests(unittest.TestCase):
     def test_normal_release_owns_only_the_beeplay_fragment(self) -> None:
         release = (ROOT / "deploy" / "release.sh").read_text()
         self.assertIn("/etc/caddy/sites/beeplay.caddy", release)
-        self.assertIn("caddy validate --config /etc/caddy/Caddyfile", release)
+        self.assertIn("validate_caddy /etc/caddy/Caddyfile", release)
         self.assertIn(". /etc/caddy/cloudflare.env", release)
         self.assertIn("systemctl reload caddy", release)
         self.assertIn("rm -f /etc/caddy/sites/beeplay.caddy", release)
         self.assertNotIn("/etc/caddy/sites/moonanswer.caddy", release)
         self.assertNotIn("/etc/nginx/sites-available/beeplay", release)
         self.assertNotIn("systemctl reload nginx", release)
+
+    def test_nothing_live_changes_before_the_rehearsal_passes(self) -> None:
+        release = (ROOT / "deploy" / "release.sh").read_text()
+        rehearsal = release.index("-m app.ops migrate")
+        new_site = release.index('validate_caddy "$NEXT/caddy/Caddyfile"')
+        dry_run_ends = release.index('echo "dry run passed')
+        swap = release.index('sync_tree "$SRC" "$APP"')
+        stop = release.index("systemctl stop beeplay\nbeeplay-ops migrate")
+        self.assertLess(rehearsal, swap)
+        self.assertLess(new_site, swap)
+        self.assertLess(dry_run_ends, release.index("SWAPPED=1"))
+        self.assertLess(swap, stop)
+        # The rehearsal migrates a copy, never the live database.
+        self.assertIn("BEEPLAY_DB_PATH=$NEXT/rehearsal.db", release)
+
+    def test_served_files_get_their_modes_on_the_server(self) -> None:
+        # A push from a 0700 directory made /srv/beeplay unreadable to Caddy.
+        release = (ROOT / "deploy" / "release.sh").read_text()
+        self.assertIn("--chmod=Da+rx,Fa+r", release)
+        self.assertIn('chmod 755 "$2"', release)
+
+    def test_a_failed_release_goes_back_and_checks_through_caddy(self) -> None:
+        release = (ROOT / "deploy" / "release.sh").read_text()
+        self.assertIn("trap on_exit EXIT", release)
+        self.assertIn('cp -a "$PREV" "$APP"', release)
+        # The database only goes back when the version moved, and only when
+        # someone types "restore".
+        self.assertIn('if [ "$moved" != "$BEFORE" ]', release)
+        self.assertIn('[ "$answer" = restore ]', release)
+        verify = release[release.index('echo "== verify =="'):]
+        self.assertIn("beeplay-check", verify)
+        self.assertIn("beeplay-check.timer", release)
 
     def test_local_deployment_check_covers_scripts_tests_and_caddy(self) -> None:
         check = (ROOT / "deploy" / "test-config.sh").read_text()

@@ -25,25 +25,47 @@ Existing HTTP claim cookies must be claimed again after the cutover.
 
 ## Releasing
 
-From a laptop checkout:
+Release only what is on `main`, from a clean export, so nothing uncommitted or
+unmerged reaches players:
 
 ```bash
-deploy/push.sh
+D=$(mktemp -d) && git fetch -q origin && git archive origin/main | tar -x -C "$D" && bash "$D/deploy/push.sh" --dry-run
 ```
 
-This copies the tree to `/root/beeplay-release/` and runs
+`--dry-run` runs every check below and changes nothing live. If it passes,
+run the same command without `--dry-run`.
+
+`push.sh` copies the tree to `/root/beeplay-release/` and runs
 `deploy/release.sh` there, which:
 
 - installs `/etc/beeplay/beeplay.env` if missing (never overwrites it)
+- **rehearses before touching anything live:** in `/srv/beeplay.next`, the new
+  code with its own dependencies migrates a copy of the live database, and the
+  new BeePlay Caddy site is validated beside the other sites. If either fails
+  the release stops there, with the site untouched.
 - backs the database up to `/var/backups/beeplay/beeplay-<time>.db`
-- keeps the previous code at `/srv/beeplay.prev`
-- syncs code, installs dependencies, the systemd unit, the BeePlay Caddy site and
-  `/usr/local/bin/beeplay-ops`
+- keeps the code that is live at `/srv/beeplay.prev`, if the site serves it
+  right now; otherwise the older, working copy stays there
+- syncs code with its file modes set on the server (Caddy must be able to read
+  everything, whatever the modes of the pushed tree), installs dependencies,
+  the systemd units, the BeePlay Caddy site, `/usr/local/bin/beeplay-ops`,
+  `beeplay-check` and `beeplay-notify`
 - stops the app, migrates the schema (`beeplay-ops migrate`), gives every
   game the current reporter and sandbox shim (`beeplay-ops refresh-reporter`;
   a changed `assets/js/game-reporter.js` republishes each game under a new
   artifact, hidden games stay hidden), starts the app
-- waits for HTTP 200 and prints rollback commands if it never comes
+- checks it the way players reach it: `beeplay-check` loads the page through
+  Caddy and every `/assets/` file it uses, which must answer 200 with the
+  right type, and makes sure a missing file is not cached
+- starts `beeplay-check.timer`, the same check every 5 minutes
+
+If anything fails after the code was swapped, the previous release comes back
+by itself: code, systemd unit and Caddy site. When the failed release had
+already moved the database to a new schema version, the previous code cannot
+run on it, so the backup has to come back too, losing what players wrote since.
+The script says how many minutes that is and does it only if you type
+`restore`; otherwise the new release stays and it prints the steps to go back
+by hand. A failed release is kept at `/srv/beeplay.failed`.
 
 Schema changes are Alembic migrations in `migrations/versions/`. The app also
 migrates on startup, so a plain restart is always safe.
@@ -135,6 +157,23 @@ journalctl -u beeplay -o cat | grep auto_hidden
 ```
 
 ## Alerts
+
+When beeplay.top breaks and when it recovers, `beeplay-check.timer` posts to
+the 🐝蜂玩BeePlay group, in Chinese, through the group's webhook bot. It checks
+every 5 minutes, through Caddy on the server, so it catches the app being
+down and files Caddy cannot serve, but not DNS or network outages. Set it up
+once: in the group, 设置 → 群机器人 → 添加机器人 → 自定义机器人, turn on
+签名校验, then add the two values to `/etc/beeplay/beeplay.env` (no restart
+needed):
+
+```
+BEEPLAY_RELEASE_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/…
+BEEPLAY_RELEASE_WEBHOOK_SECRET=…
+```
+
+`beeplay-check` on the server runs the check by hand; `beeplay-notify "text"`
+posts to the group. `systemctl list-timers beeplay-check.timer` shows when it
+last ran; `journalctl -u beeplay-check -n 20` shows what it found.
 
 New uploads, failed uploads and auto-hidden games post to a Feishu webhook
 once `BEEPLAY_ALERT_WEBHOOK` in `/etc/beeplay/beeplay.env` is set, then

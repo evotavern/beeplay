@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+# Installed as /usr/local/bin/beeplay-check. Loads beeplay.top the way a
+# player's browser does, through Caddy: the page, then every /assets/ file it
+# uses. Each must answer 200 with the right type, and a missing file must not
+# be cached. Prints one line per problem and exits 1, or exits 0.
+#
+#   beeplay-check               # release.sh runs this after every restart
+#   beeplay-check --alert       # the 5-minute timer: also tells Lark when the
+#                               # result changes (broken, or recovered)
+#   beeplay-check --files-only  # just the page and its files, not caching
+#
+# On the server it connects to Caddy on this machine, so DNS and the network
+# are not part of the check. BEEPLAY_CHECK_URL points it at another site
+# (the tests use a local one).
+set -uo pipefail
+
+ALERT=0
+CACHING=1
+for arg in "$@"; do
+  case "$arg" in
+    --alert) ALERT=1 ;;
+    --files-only) CACHING=0 ;;
+    *) echo "usage: beeplay-check [--alert] [--files-only]" >&2; exit 2 ;;
+  esac
+done
+
+if [ -n "${BEEPLAY_CHECK_URL:-}" ]; then
+  BASE=${BEEPLAY_CHECK_URL%/}
+  RESOLVE=()
+else
+  BASE=https://beeplay.top
+  RESOLVE=(--resolve beeplay.top:443:127.0.0.1)
+fi
+STATE=${BEEPLAY_CHECK_STATE:-/var/lib/beeplay/check.state}
+RETRY_S=${BEEPLAY_CHECK_RETRY_S:-15}
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+fetch() {  # url outfile -> "status|content-type|cache-control"
+  rm -f "$WORK/headers"
+  curl -sS --max-time 10 "${RESOLVE[@]}" -A beeplay-check -o "$2" -D "$WORK/headers" \
+    -w '%{http_code}|%{content_type}' "$1" 2>"$WORK/curl-error" || true
+  local cache
+  cache=$(grep -i '^cache-control:' "$WORK/headers" 2>/dev/null | tail -1 | cut -d: -f2- | tr -d '\r' | sed 's/^ *//')
+  printf '|%s' "$cache"
+}
+
+expected_type() {  # path -> part of the content type it must have, or empty
+  case "${1%%\?*}" in
+    *.js) echo javascript ;;
+    *.css) echo text/css ;;
+    *.png) echo image/png ;;
+    *.jpg|*.jpeg) echo image/jpeg ;;
+    *.webp) echo image/webp ;;
+    *.svg) echo image/svg+xml ;;
+    *.ico) echo icon ;;
+    *.woff2) echo font/woff2 ;;
+    *.json) echo json ;;
+  esac
+}
+
+check() {  # prints problems, one per line; prints "ok: …" when there are none
+  local problems=() result status type cache files="" path want
+  result=$(fetch "$BASE/" "$WORK/page")
+  IFS='|' read -r status type cache <<<"$result"
+  if [ "$status" != 200 ] || [[ "$type" != text/html* ]]; then
+    problems+=("$status $BASE/ (page: expected 200 text/html, got ${type:-nothing}$(sed 's/^/; /' "$WORK/curl-error" | tr -d '\n'))")
+  else
+    files=$(grep -oE '/assets/[^"'"'"'[:space:]<>)]+' "$WORK/page" | sort -u)
+    if [ -z "$files" ]; then
+      problems+=("200 $BASE/ (the page uses no /assets/ files: is it the BeePlay page?)")
+    fi
+    while IFS= read -r path; do
+      [ -n "$path" ] || continue
+      result=$(fetch "$BASE$path" /dev/null)
+      IFS='|' read -r status type cache <<<"$result"
+      want=$(expected_type "$path")
+      if [ "$status" != 200 ]; then
+        problems+=("$status $BASE$path")
+      elif [ -n "$want" ] && [[ "$type" != *"$want"* ]]; then
+        problems+=("$status $BASE$path (expected $want, got ${type:-nothing})")
+      fi
+    done <<<"$files"
+  fi
+  # A 403 or 404 that browsers keep for a week outlives the fix: after the
+  # 2026-09-24 outage, phones stayed broken until every asset URL changed.
+  if [ "$CACHING" = 1 ]; then
+    result=$(fetch "$BASE/assets/beeplay-check-missing.js" /dev/null)
+    IFS='|' read -r status type cache <<<"$result"
+    if [ "$status" = 200 ]; then
+      problems+=("$status $BASE/assets/beeplay-check-missing.js (a missing file answered 200)")
+    elif [[ "$cache" == *max-age* || "$cache" == *immutable* ]]; then
+      problems+=("$status $BASE/assets/beeplay-check-missing.js (error cached: Cache-Control: $cache)")
+    fi
+  fi
+  if [ ${#problems[@]} -eq 0 ]; then
+    echo "ok: $BASE/ and $(grep -c . <<<"$files") files"
+  else
+    printf '%s\n' "${problems[@]}"
+  fi
+}
+
+report=$(check)
+if [[ "$report" != ok:* ]] && [ "$ALERT" = 1 ] && [ "$RETRY_S" -gt 0 ]; then
+  # A restart during a release is a few seconds of 502: look again first.
+  sleep "$RETRY_S"
+  report=$(check)
+fi
+echo "$report"
+[[ "$report" == ok:* ]] && now=ok || now=broken
+
+if [ "$ALERT" = 1 ]; then
+  before=$(cat "$STATE" 2>/dev/null || echo ok)
+  if [ "$now" != "$before" ]; then
+    if [ "$now" = broken ]; then
+      message=$(printf '🔴 beeplay.top 出问题了，玩家可能打不开或点不动。\n%s\n（服务器每 5 分钟检查一次，恢复后会再通知。）' "$(head -5 <<<"$report")")
+    else
+      message="🟢 beeplay.top 已恢复正常。"
+    fi
+    # The state only moves once the team has been told, so a failed post is
+    # retried on the next run.
+    if beeplay-notify "$message"; then
+      echo "$now" >"$STATE"
+    fi
+  fi
+fi
+[ "$now" = ok ]
