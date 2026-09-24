@@ -1220,6 +1220,13 @@
     }
     .follow-author.following { border-color: var(--lime); background: var(--lime); color: var(--ink); }
     .game-tray .game-author { display: flex; align-items: center; gap: 4px; margin-top: 5px; color: rgba(255,255,255,.76); font-size: 10px; }
+    /* The author as main's author_link renders it: a photo and name linking
+       to their page, sized for the tray. */
+    body.mobile-preview .game-tray .tray-author {
+      display: inline-flex; align-items: center; gap: 5px; min-width: 0;
+      color: var(--white); font-weight: 850; text-decoration: none;
+    }
+    body.mobile-preview .game-tray .tray-author img { width: 16px; height: 16px; border-radius: 50%; object-fit: cover; }
     .author-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--lime); box-shadow: inset 0 0 0 2px rgba(255,255,255,.3); }
     .game-tray-actions {
       display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
