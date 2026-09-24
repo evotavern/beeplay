@@ -4,7 +4,8 @@
   var modal = document.getElementById("createModal");
   var toast = document.getElementById("toast");
   var toastTimer;
-  var feedWheelLocked = false;
+  var feedWheelMoved = false;
+  var feedWheelQuiet;
 
   function showToast(message, link) {
     toast.textContent = message;
@@ -26,12 +27,16 @@
     return view ? view.dataset.view : "home";
   }
 
-  // Nav and body live outside #viewport, so htmx never touches them.
-  function syncChrome() {
-    var view = currentView();
+  function highlightNav(view) {
     document.querySelectorAll(".nav-item, .desktop-nav button").forEach(function (nav) {
       nav.classList.toggle("active", nav.dataset.viewTarget === view);
     });
+  }
+
+  // Nav and body live outside #viewport, so htmx never touches them.
+  function syncChrome() {
+    var view = currentView();
+    highlightNav(view);
     document.body.classList.toggle("feed-mode", view === "home");
   }
 
@@ -39,6 +44,17 @@
     if (event.detail.target.id !== "viewport") return;
     syncChrome();
     window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+
+  // The tapped page shows as current at once: the page itself is a network
+  // round trip away, and until it came the old one stayed lit. A request that
+  // fails puts the highlight back on the page still showing.
+  document.body.addEventListener("htmx:beforeRequest", function (event) {
+    var view = event.detail.elt.dataset && event.detail.elt.dataset.viewTarget;
+    if (view && event.detail.target && event.detail.target.id === "viewport") highlightNav(view);
+  });
+  document.body.addEventListener("htmx:afterRequest", function (event) {
+    if (!event.detail.successful) syncChrome();
   });
 
   // A history restore swaps #viewport without firing htmx:afterSwap, and the
@@ -155,13 +171,13 @@
 
   // --- feed navigation -------------------------------------------------
   // Re-queried per call: the feed is destroyed and rebuilt on every swap.
+  // Counted from the active card, not the scroll position: mid-scroll, no
+  // card is at the top yet, and a second move would restart from the first.
   function moveFeed(direction) {
     var feed = document.getElementById("homeFeed");
     var cards = [].slice.call(document.querySelectorAll(".game-card"));
     if (!feed || !cards.length) return;
-    var currentIndex = Math.max(0, cards.findIndex(function (card) {
-      return Math.abs(card.offsetTop - feed.scrollTop) < 40;
-    }));
+    var currentIndex = Math.max(0, cards.indexOf(activeInlineCard));
     var nextIndex = Math.min(cards.length - 1, Math.max(0, currentIndex + direction));
     feed.scrollTo({ top: cards[nextIndex].offsetTop, behavior: "smooth" });
     activateInlineGame(cards[nextIndex]);
@@ -197,19 +213,26 @@
     button.setAttribute("aria-pressed", active ? "true" : "false");
   }
 
+  // Shown on the tap rather than after the round trip, and put back if the
+  // server refuses it.
   async function updateToggle(button, card, action, title) {
     if (button.disabled) return;
     button.disabled = true;
     var active = !button.classList.contains("active");
+    var counter = button.querySelector("[data-social-count='likes']");
+    var count = counter ? parseInt(counter.textContent, 10) : NaN;
+    renderToggle(button, active);
+    if (!isNaN(count)) counter.textContent = Math.max(0, count + (active ? 1 : -1));
     try {
       var result = await socialFetch(card.dataset.gameId, action, { active: active });
       renderToggle(button, result.active);
-      var counter = button.querySelector("[data-social-count='likes']");
       if (counter && typeof result.count === "number") counter.textContent = result.count;
       showToast(result.active
         ? (action === "like" ? "已喜欢 " : "已收藏 ") + title
         : (action === "like" ? "已取消喜欢" : "已取消收藏"));
     } catch (error) {
+      renderToggle(button, !active);
+      if (!isNaN(count)) counter.textContent = count;
       showToast(error.message);
     } finally {
       button.disabled = false;
@@ -261,13 +284,24 @@
     }
   }
 
+  // One trackpad flick is dozens of wheel events, still arriving a second
+  // after the fingers lift (macOS momentum), so a fixed lock let one flick
+  // skip games. Move once per gesture: it ends when the wheel goes quiet.
+  // Until then body.feed-wheeling lets the rest of the flick through the
+  // game frames the feed scrolls under the pointer, or they would swallow it.
   document.addEventListener("wheel", function (event) {
-    if (!event.target.closest || !event.target.closest("[data-feed-swipe]")) return;
-    if (Math.abs(event.deltaY) < 8 || feedWheelLocked) return;
+    var onTray = event.target.closest && event.target.closest("[data-feed-swipe]");
+    if (!onTray && !feedWheelMoved) return;
     event.preventDefault();
-    feedWheelLocked = true;
+    clearTimeout(feedWheelQuiet);
+    feedWheelQuiet = setTimeout(function () {
+      feedWheelMoved = false;
+      document.body.classList.remove("feed-wheeling");
+    }, 200);
+    if (feedWheelMoved || Math.abs(event.deltaY) < 8) return;
+    feedWheelMoved = true;
+    document.body.classList.add("feed-wheeling");
     moveFeed(event.deltaY > 0 ? 1 : -1);
-    setTimeout(function () { feedWheelLocked = false; }, 520);
   }, { passive: false });
 
   // --- delegated clicks ------------------------------------------------
@@ -749,29 +783,55 @@
     if (event.key === "Escape" && expandedCard) collapseGame();
   });
 
-  var swipeStart = null;
+  // A vertical drag on the tray switches games, decided while it moves: a
+  // mouse let go over the game sends its pointerup to the game's frame, and
+  // iOS cancels a touch it takes over. Once it is a drag, the tray captures
+  // the pointer, and letting go is not a tap on what lies under it.
+  var swipe = null;
+  var dragEndedAt = 0;
   document.addEventListener("pointerdown", function (event) {
-    var tray = event.target.closest && event.target.closest("[data-feed-swipe]");
-    if (!tray) return;
-    swipeStart = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
+    var tray = event.isPrimary && event.target.closest && event.target.closest("[data-feed-swipe]");
+    swipe = tray ? { tray: tray, x: event.clientX, y: event.clientY, id: event.pointerId } : null;
   });
-  document.addEventListener("pointerup", function (event) {
-    if (!swipeStart || event.pointerId !== swipeStart.pointerId) return;
-    var dy = event.clientY - swipeStart.y;
-    var dx = event.clientX - swipeStart.x;
-    swipeStart = null;
+  document.addEventListener("pointermove", function (event) {
+    if (!swipe || event.pointerId !== swipe.id || swipe.moved) return;
+    var dy = event.clientY - swipe.y;
+    var dx = event.clientX - swipe.x;
+    if (!swipe.dragging && Math.abs(dy) > 8) {
+      swipe.dragging = true;
+      try { swipe.tray.setPointerCapture(event.pointerId); } catch (ignored) {}
+    }
     if (Math.abs(dy) > 44 && Math.abs(dy) > Math.abs(dx) * 1.2) {
-      event.preventDefault();
+      swipe.moved = true;
       moveFeed(dy < 0 ? 1 : -1);
     }
   });
-  document.addEventListener("pointercancel", function () { swipeStart = null; });
+  function endSwipe(event) {
+    if (!swipe || event.pointerId !== swipe.id) return;
+    if (swipe.dragging) dragEndedAt = Date.now();
+    swipe = null;
+  }
+  document.addEventListener("pointerup", endSwipe);
+  document.addEventListener("pointercancel", endSwipe);
+  document.addEventListener("click", function (event) {
+    if (Date.now() - dragEndedAt > 300) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }, true);
 
   // --- persistent follows and comments --------------------------------
+  function renderFollow(button, active) {
+    button.classList.toggle("following", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+    button.textContent = active ? "已关注" : "+ 关注";
+  }
+
+  // Like the toggles: shown on the tap, put back if refused.
   function updateFollow(button) {
     if (button.disabled) return;
     button.disabled = true;
     var active = !button.classList.contains("following");
+    renderFollow(button, active);
     fetch("/api/users/" + button.dataset.followUser + "/follow", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -780,10 +840,9 @@
       if (!response.ok) throw new Error("关注没有保存，请重试");
       return response.json();
     }).then(function (result) {
-      button.classList.toggle("following", result.active);
-      button.setAttribute("aria-pressed", result.active ? "true" : "false");
-      button.textContent = result.active ? "已关注" : "+ 关注";
+      renderFollow(button, result.active);
     }).catch(function (error) {
+      renderFollow(button, !active);
       showToast(error.message);
     }).finally(function () { button.disabled = false; });
   }
@@ -875,10 +934,19 @@
       showToast(error.message);
     });
   });
+  function renderCommentLike(button, active, count) {
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+    button.textContent = "♥ " + count;
+  }
+
   document.addEventListener("click", function (event) {
     var button = event.target.closest && event.target.closest("[data-comment-like]");
-    if (!button) return;
+    if (!button || button.disabled) return;
+    button.disabled = true;
     var active = !button.classList.contains("active");
+    var count = parseInt(button.textContent.replace(/[^0-9]/g, ""), 10) || 0;
+    renderCommentLike(button, active, Math.max(0, count + (active ? 1 : -1)));
     fetch("/api/comments/" + button.dataset.commentLike + "/like", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ active: active })
@@ -886,12 +954,11 @@
       if (!response.ok) throw new Error("点赞没有保存，请重试");
       return response.json();
     }).then(function (result) {
-      button.classList.toggle("active", result.active);
-      button.setAttribute("aria-pressed", result.active ? "true" : "false");
-      button.textContent = "♥ " + result.count;
+      renderCommentLike(button, result.active, result.count);
     }).catch(function (error) {
+      renderCommentLike(button, !active, count);
       showToast(error.message);
-    });
+    }).finally(function () { button.disabled = false; });
   });
 
   document.body.addEventListener("htmx:afterSwap", function (event) {
