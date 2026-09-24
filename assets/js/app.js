@@ -39,7 +39,6 @@
     if (event.detail.target.id !== "viewport") return;
     syncChrome();
     window.scrollTo({ top: 0, behavior: "smooth" });
-    setTimeout(scrollToSharedGame, 0);
   });
 
   // A history restore swaps #viewport without firing htmx:afterSwap, and the
@@ -47,7 +46,10 @@
   // stale nav highlight, and a missing body.feed-mode that unlocks page scroll
   // underneath the feed. htmx restores the scroll position itself, so only the
   // chrome needs resyncing here.
-  document.body.addEventListener("htmx:historyRestore", syncChrome);
+  document.body.addEventListener("htmx:historyRestore", function () {
+    syncChrome();
+    initInlineGames();
+  });
 
   function openCreateModal() {
     showCreateChoices();
@@ -158,18 +160,18 @@
     var cards = [].slice.call(document.querySelectorAll(".game-card"));
     if (!feed || !cards.length) return;
     var currentIndex = Math.max(0, cards.findIndex(function (card) {
-      return Math.abs(card.getBoundingClientRect().top - feed.getBoundingClientRect().top) < 40;
+      return Math.abs(card.offsetTop - feed.scrollTop) < 40;
     }));
     var nextIndex = Math.min(cards.length - 1, Math.max(0, currentIndex + direction));
-    cards[nextIndex].scrollIntoView({ behavior: "smooth", block: "start" });
+    feed.scrollTo({ top: cards[nextIndex].offsetTop, behavior: "smooth" });
+    activateInlineGame(cards[nextIndex]);
   }
 
-  function scrollToSharedGame() {
-    if (currentView() !== "home") return;
+  function sharedGameCard() {
+    if (currentView() !== "home") return null;
     var artifact = new URLSearchParams(window.location.search).get("game");
-    if (!artifact) return;
-    var card = document.querySelector('.game-card[data-artifact="' + CSS.escape(artifact) + '"]');
-    if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (!artifact) return null;
+    return document.querySelector('.game-card[data-artifact="' + CSS.escape(artifact) + '"]');
   }
 
   function interactionId() {
@@ -260,8 +262,8 @@
   }
 
   document.addEventListener("wheel", function (event) {
-    if (!event.target.closest || !event.target.closest(".home-feed")) return;
-    if (Math.abs(event.deltaY) < 8 || feedWheelLocked || gamePlaying()) return;
+    if (!event.target.closest || !event.target.closest("[data-feed-swipe]")) return;
+    if (Math.abs(event.deltaY) < 8 || feedWheelLocked) return;
     event.preventDefault();
     feedWheelLocked = true;
     moveFeed(event.deltaY > 0 ? 1 : -1);
@@ -278,13 +280,19 @@
       var gameCard = gameAction.closest(".game-card");
       var title = (gameCard && gameCard.dataset.gameTitle) || "这个游戏";
       var action = gameAction.dataset.gameAction;
-      if (action === "play") {
-        togglePlay(gameCard, gameAction, title);
-      } else if (action === "like" || action === "save") {
+      if (action === "like" || action === "save") {
         updateToggle(gameAction, gameCard, action, title);
+      } else if (action === "comments") {
+        openComments(gameCard);
       } else if (action === "share") {
         shareGame(gameAction, gameCard, title);
       }
+      return;
+    }
+
+    var follow = target.closest("[data-follow-user]");
+    if (follow) {
+      updateFollow(follow);
       return;
     }
 
@@ -397,12 +405,6 @@
     htmx.ajax("GET", "/create", { target: "#viewport", swap: "innerHTML" }).then(function () {
       var ideaInput = document.getElementById("ideaInput");
       if (!ideaInput) return;
-      if (choice.dataset.modalChoice === "habit") {
-        ideaInput.value = "帮我做一个每天都想打开的习惯计划";
-      }
-      if (choice.dataset.modalChoice === "remix") {
-        ideaInput.value = "我想 Remix 一个轻松、有一点惊喜的互动作品";
-      }
       setTimeout(function () { ideaInput.focus(); }, 250);
     });
   });
@@ -497,54 +499,18 @@
     if (event.key === "Escape" && modal.classList.contains("open")) closeCreateModal();
     if (modal.classList.contains("open")) return;
     if (currentView() !== "home") return;
-    if (gamePlaying()) return;
     if (event.key === "ArrowDown") { event.preventDefault(); moveFeed(1); }
     if (event.key === "ArrowUp") { event.preventDefault(); moveFeed(-1); }
   });
 
 
-  // --- inline game host ------------------------------------------------
-  // A game is an offline H5 artifact in its own sandboxed iframe. The iframe
-  // lives in #gameHost, a body-level sibling of #viewport, for one reason:
-  // htmx replaces #viewport wholesale on every nav, which destroys any iframe
-  // inside it and the running game with it. Body level is what lets a full
-  // four-stage session survive navigation. #createModal and #toast sit at the
-  // same level for the same reason.
-  //
-  // The host is NEVER reparented. Moving an iframe node in the DOM reloads its
-  // document in every browser, which would destroy exactly the session this
-  // design exists to preserve. So the iframe is appended once and only ever
-  // shown or hidden — never moved.
-  //
-  // The host is full-bleed (position:fixed, inset:0, z-index:60), which covers
-  // beeplay's topbar and bottom nav as well as the card. That is what resolves
-  // double chrome: the game's own topbar and journey nav become the only
-  // chrome on screen, and nothing in the artifact had to change.
-  var gameHost = document.getElementById("gameHost");
-  var gameStop = document.getElementById("gameStop");
-  var gameMute = document.getElementById("gameMute");
-
-  // One live session at a time: {hash, frame, card, active}. `active` false
-  // means paused — the iframe is still mounted and still holding game state,
-  // the host is just hidden and the feed unlocked.
-  var session = null;
-
-  // TODO(completion-contract): After we have ten real games, review how each
-  // one expresses completion and define a dedicated game-to-host hook from
-  // that evidence. Keep completion separate from views and health signals;
-  // do not infer it from load, pause, or exit. Then retrofit those ten games
-  // to the agreed contract.
-
-  function gamePlaying() {
-    return !!(session && session.active);
-  }
-
   // --- crash reporting -------------------------------------------------
   // Every uploaded game carries an inlined reporter (assets/js/game-reporter.js)
-  // that postMessages "loaded" and "error" here. The host adds "start" on
-  // mount and "timeout" when "loaded" never arrives, which is also what a
-  // missing or broken index.html looks like from here. All of it goes to
-  // /api/game-health, which hides games that keep crashing.
+  // that postMessages "loaded" and "error" here. The feed adds "start" when a
+  // game first becomes the active card and "timeout" when "loaded" never
+  // arrives, which is also what a missing or broken index.html looks like from
+  // here. All of it goes to /api/game-health, which hides games that keep
+  // crashing.
   var loadTimeoutMs = 1000 * (parseInt(document.body.dataset.loadTimeoutS, 10) || 10);
 
   function reportHealth(play, kind, detail) {
@@ -564,56 +530,30 @@
     } catch (ignored) {}
   }
 
-  function newHealthId() {
-    return interactionId();
-  }
+  // TODO(completion-contract): After we have ten real games, review how each
+  // one expresses completion and define a dedicated game-to-host hook from
+  // that evidence. Keep completion separate from views and health signals;
+  // do not infer it from load, pause, or exit. Then retrofit those ten games
+  // to the agreed contract.
 
-  function watchHealth(play) {
-    play.healthId = newHealthId();
-    play.mountedAt = Date.now();
-    play.loaded = false;
-    socialFetch(play.workId, "view", { event_id: play.healthId }).catch(function () {});
-    reportHealth(play, "start");
-    play.loadTimer = setTimeout(function () {
-      if (!play.loaded) reportHealth(play, "timeout", "no load signal after " + loadTimeoutMs + "ms");
-    }, loadTimeoutMs);
-  }
+  // --- inline game feed ----------------------------------------------
+  // Games are full-screen phone pages. Each frame is given the screen size
+  // the game would get opened on its own, then scaled evenly into the game
+  // window, so every game lays out exactly as it does standalone. Expanding
+  // plays it at full size; the frame is only rescaled, never reloaded.
+  // Games own every gesture inside their frame; only the tray switches cards.
+  var inlinePlays = new WeakMap();
+  var activeInlineCard = null;
+  var expandedCard = null;
+  // Wider than any phone: show games at a typical phone's screen size.
+  var PHONE_MAX_WIDTH = 500;
+  var PHONE_SCREEN = { width: 390, height: 844 };
 
-  window.addEventListener("message", function (event) {
-    var play = session;
-    if (!play || !play.frame || event.source !== play.frame.contentWindow) return;
-    var data = event.data || {};
-    if (data.beeplay === "loaded" && !play.loaded) {
-      play.loaded = true;
-      clearTimeout(play.loadTimer);
-      reportHealth(play, "loaded");
-      if (muted) tellGame("mute");
-    } else if (data.beeplay === "error") {
-      reportHealth(play, "error", data.detail);
-    }
-  });
-
-  function mountGame(card, hash) {
-    var frame = document.createElement("iframe");
-    frame.src = "/games/" + hash + "/index.html";
-    // No allow-same-origin: the game runs on an opaque origin and cannot
-    // reach this document. The host can only send it the four audio
-    // commands in tellGame(); there is deliberately no API beyond that.
-    frame.setAttribute("sandbox", "allow-scripts");
-    // Lets Chrome start the game's audio without waiting for a tap inside the
-    // frame; elsewhere the reporter's shim resumes audio on the first tap.
-    frame.setAttribute("allow", "autoplay");
-    frame.title = card.dataset.gameTitle || "游戏";
-    frame.className = "game-frame";
-    gameHost.appendChild(frame);
-    return frame;
-  }
-
-  // The game's inlined reporter (assets/js/game-reporter.js) holds its audio:
-  // a hidden iframe keeps playing sound, and the game cannot tell it is hidden.
-  function tellGame(command) {
-    if (!session || !session.frame || !session.frame.contentWindow) return;
-    session.frame.contentWindow.postMessage({ beeplayHost: command }, "*");
+  // The game's inlined reporter holds its audio on "pause" and "mute": a card
+  // scrolled out of view keeps running, and the game cannot tell.
+  function tellGame(frame, command) {
+    if (!frame || !frame.contentWindow) return;
+    frame.contentWindow.postMessage({ beeplayHost: command }, "*");
   }
 
   // One mute for every game, kept across visits like a feed's sound toggle.
@@ -621,127 +561,343 @@
   try { muted = localStorage.getItem("beeplay.muted") === "1"; } catch (ignored) {}
 
   function showMute() {
-    if (!gameMute) return;
-    gameMute.textContent = muted ? "🔇" : "🔊";
-    gameMute.setAttribute("aria-label", muted ? "打开声音" : "静音");
-    gameMute.title = muted ? "打开声音" : "静音";
+    document.querySelectorAll("[data-game-mute]").forEach(function (button) {
+      button.classList.toggle("muted", muted);
+      button.setAttribute("aria-pressed", muted ? "true" : "false");
+      button.setAttribute("aria-label", muted ? "打开声音" : "静音");
+    });
   }
 
   function toggleMute() {
     muted = !muted;
     try { localStorage.setItem("beeplay.muted", muted ? "1" : "0"); } catch (ignored) {}
     showMute();
-    tellGame(muted ? "mute" : "unmute");
-  }
-
-  function resumeGame(card, button) {
-    session.card = card;
-    session.active = true;
-    tellGame("resume");
-    document.body.classList.add("playing");
-    gameHost.hidden = false;
-    if (button) { button.classList.add("active"); button.textContent = "Ⅱ"; }
-  }
-
-  function pauseGame() {
-    if (!session) return;
-    session.active = false;
-    document.body.classList.remove("playing");
-    gameHost.hidden = true;
-    tellGame("pause");
-    // Hidden, not unmounted. The iframe stays in the DOM holding the game's
-    // JS state, so resuming returns the user to their half-made cup. This is
-    // the whole reason the host is body-level: a paused session has to survive
-    // an htmx nav swap, and anything inside #viewport would not.
-    var button = session.card && session.card.querySelector('[data-game-action="play"]');
-    if (button) { button.classList.remove("active"); button.textContent = "▶"; }
-  }
-
-  // Destroys the document and the session with it. Only ever deliberate.
-  function endGame() {
-    if (!session) return;
-    pauseGame();
-    // Only the frames go. #gameStop is a child of the host, so clearing the
-    // host wholesale would delete the sole exit control — body.playing hides
-    // the topbar and the bottom nav, leaving a full-bleed overlay with no way
-    // out but the Escape key, which a phone does not have.
-    [].forEach.call(gameHost.querySelectorAll("iframe"), function (frame) {
-      frame.remove();
+    document.querySelectorAll(".game-frame").forEach(function (frame) {
+      tellGame(frame, muted ? "mute" : "unmute");
     });
-    clearTimeout(session.loadTimer);
-    session = null;
   }
 
-  function togglePlay(card, button, title) {
-    // No artifact means nothing to run; keep the prototype's toast.
-    var hash = card && card.dataset.artifact;
-    if (!hash || !gameHost) {
-      button.classList.toggle("active");
-      var on = button.classList.contains("active");
-      button.textContent = on ? "Ⅱ" : "▶";
-      showToast(on ? "正在试玩 " + title : "已暂停 " + title);
-      return;
-    }
-
-    if (session && session.hash === hash) {
-      if (session.active) pauseGame(); else resumeGame(card, button);
-      return;
-    }
-
-    // Switching games throws away the cup in progress, so make it a decision.
-    if (session && !window.confirm("换一个游戏会结束当前这局，确定吗？")) return;
-    endGame();
-
-    session = { hash: hash, workId: card.dataset.gameId, frame: null, card: card, active: false };
-    session.frame = mountGame(card, hash);
-    watchHealth(session);
-    resumeGame(card, button);
+  function gameScreen() {
+    if (window.innerWidth > PHONE_MAX_WIDTH) return PHONE_SCREEN;
+    return { width: window.innerWidth, height: window.innerHeight };
   }
 
-  // Nav guard. Hiding beeplay's chrome while body.playing removes the bottom
-  // nav from the screen, so stray taps largely disappear — but the topbar
-  // brand and nav links still carry hx-get, so leaving must stay deliberate.
-  document.addEventListener("click", function (event) {
-    if (!gamePlaying()) return;
-    var nav = event.target.closest("[hx-get], [data-view-target]");
-    if (!nav || gameHost.contains(nav)) return;
-    if (!window.confirm("离开会暂停这一局，确定吗？")) {
-      event.preventDefault();
-      event.stopPropagation();
-      return;
-    }
-    pauseGame();
-  }, true);
-
-  // The card is rebuilt on every swap, so re-find it by hash and re-anchor.
-  // A paused session survives the swap because the host is outside #viewport.
-  function reanchorSession() {
-    if (!session) return;
-    session.card = document.querySelector(
-      '.game-card[data-artifact="' + session.hash + '"]'
-    );
+  function fitStage(windowElement) {
+    var stage = windowElement.querySelector(".game-stage");
+    if (!stage || !windowElement.clientWidth || !windowElement.clientHeight) return;
+    var screen = gameScreen();
+    var scale = Math.min(1, windowElement.clientWidth / screen.width,
+      windowElement.clientHeight / screen.height);
+    stage.style.width = screen.width + "px";
+    stage.style.height = screen.height + "px";
+    stage.style.setProperty("--game-scale", scale.toFixed(4));
   }
 
-  document.body.addEventListener("htmx:afterSwap", function (event) {
-    if (event.detail.target.id !== "viewport") return;
-    reanchorSession();
+  function fitStages() {
+    document.querySelectorAll(".game-window").forEach(fitStage);
+  }
+
+  // Game windows change size without a window resize too: the tray's
+  // max-height breakpoint, htmx swaps, and expanding or collapsing a game.
+  // Cards are one screen tall, so a resize (rotation, the address bar, a
+  // desktop window) moves every card; keep the active one aligned. The
+  // observer runs after layout, when the window's resize event may not.
+  function alignFeed() {
+    var feed = document.getElementById("homeFeed");
+    if (feed && activeInlineCard && feed.contains(activeInlineCard)) {
+      feed.scrollTo({ top: activeInlineCard.offsetTop, behavior: "instant" });
+    }
+  }
+  var stageObserver = window.ResizeObserver
+    ? new ResizeObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.target.id === "homeFeed") alignFeed();
+          else fitStage(entry.target);
+        });
+      })
+    : null;
+  window.addEventListener("resize", function () {
+    fitStages();
+    alignFeed();
   });
 
-  // Back and forward rebuild the card too, and a paused session has to survive
-  // them for the same reason it survives a nav swap.
-  document.body.addEventListener("htmx:historyRestore", reanchorSession);
+  function activateInlineGame(card) {
+    if (!card || card === activeInlineCard) return;
+    if (expandedCard) collapseGame();
+    var candidates = [].slice.call(document.querySelectorAll(".game-card"));
+    var activeIndex = candidates.indexOf(card);
+    candidates.forEach(function (candidate, index) {
+      var frame = candidate.querySelector(".game-frame");
+      var active = candidate === card;
+      if (frame && Math.abs(index - activeIndex) <= 1 && !frame.hasAttribute("src") && frame.dataset.src) {
+        frame.setAttribute("src", frame.dataset.src);
+      }
+      candidate.classList.toggle("active-game", active);
+      tellGame(frame, active ? "resume" : "pause");
+      if (active) {
+        var play = inlinePlays.get(frame);
+        if (play && !play.started) {
+          play.started = true;
+          play.mountedAt = Date.now();
+          socialFetch(play.workId, "view", { event_id: play.healthId }).catch(function () {});
+          reportHealth(play, "start");
+          play.loadTimer = setTimeout(function () {
+            if (!play.loaded) reportHealth(play, "timeout", "no load signal after " + loadTimeoutMs + "ms");
+          }, loadTimeoutMs);
+        }
+      }
+    });
+    activeInlineCard = card;
+  }
 
-  // The exit control belongs to the host, not the card: the full-bleed
-  // overlay covers .game-actions, so the card's own Ⅱ is unreachable while
-  // playing. It pauses rather than ends — see pauseGame().
-  if (gameStop) gameStop.addEventListener("click", pauseGame);
-  if (gameMute) gameMute.addEventListener("click", toggleMute);
-  showMute();
+  function expandGame(card) {
+    if (!card || expandedCard === card) return;
+    if (card !== activeInlineCard) activateInlineGame(card);
+    expandedCard = card;
+    card.classList.add("expanded");
+    document.body.classList.add("game-expanded");
+    // The phone's back gesture (and WeChat's back button) collapses the game
+    // instead of leaving BeePlay.
+    history.pushState({ beeplayExpanded: true }, "");
+    fitStage(card.querySelector(".game-window"));
+    var collapse = card.querySelector("[data-game-collapse]");
+    if (collapse) collapse.focus({ preventScroll: true });
+  }
+
+  function collapseGame(fromHistory) {
+    var card = expandedCard;
+    if (!card) return;
+    expandedCard = null;
+    card.classList.remove("expanded");
+    document.body.classList.remove("game-expanded");
+    if (!fromHistory && history.state && history.state.beeplayExpanded) history.back();
+    fitStage(card.querySelector(".game-window"));
+  }
+
+  window.addEventListener("popstate", function () {
+    if (expandedCard) collapseGame(true);
+  });
+
+  function initInlineGames() {
+    var cards = [].slice.call(document.querySelectorAll(".game-card"));
+    cards.forEach(function (card) {
+      var frame = card.querySelector(".game-frame");
+      if (!frame || inlinePlays.has(frame)) return;
+      var play = {
+        frame: frame,
+        card: card,
+        hash: card.dataset.artifact,
+        workId: card.dataset.gameId,
+        healthId: interactionId(),
+        mountedAt: 0,
+        started: false,
+        loaded: false
+      };
+      inlinePlays.set(frame, play);
+      if (stageObserver) stageObserver.observe(card.querySelector(".game-window"));
+      frame.addEventListener("load", function () {
+        frame.classList.add("loaded");
+        var loading = card.querySelector(".game-loading");
+        if (loading) loading.hidden = true;
+        if (play.started && !play.loaded) {
+          play.loaded = true;
+          clearTimeout(play.loadTimer);
+          reportHealth(play, "loaded");
+        }
+        tellGame(frame, card === activeInlineCard ? "resume" : "pause");
+        if (muted) tellGame(frame, "mute");
+      });
+    });
+    var feed = document.getElementById("homeFeed");
+    if (feed && stageObserver) stageObserver.observe(feed);
+    fitStages();
+    showMute();
+    if (cards.length && !(activeInlineCard && document.contains(activeInlineCard))) {
+      activateInlineGame(sharedGameCard() || cards[0]);
+      alignFeed();
+    }
+  }
+
+  window.addEventListener("message", function (event) {
+    var matched = null;
+    document.querySelectorAll(".game-frame").forEach(function (frame) {
+      if (event.source === frame.contentWindow) matched = inlinePlays.get(frame);
+    });
+    if (!matched) return;
+    var data = event.data || {};
+    if (data.beeplay === "loaded" && !matched.loaded) {
+      matched.loaded = true;
+      clearTimeout(matched.loadTimer);
+      matched.frame.classList.add("loaded");
+      var loading = matched.card.querySelector(".game-loading");
+      if (loading) loading.hidden = true;
+      reportHealth(matched, "loaded");
+    } else if (data.beeplay === "error") {
+      reportHealth(matched, "error", data.detail);
+    }
+  });
+
+  document.addEventListener("click", function (event) {
+    if (!event.target.closest) return;
+    var expand = event.target.closest("[data-game-expand]");
+    if (expand) { expandGame(expand.closest(".game-card")); return; }
+    if (event.target.closest("[data-game-mute]")) { toggleMute(); return; }
+    if (event.target.closest("[data-game-collapse]")) collapseGame();
+  });
 
   document.addEventListener("keydown", function (event) {
-    if (event.key === "Escape" && gamePlaying()) pauseGame();
+    if (event.key === "Escape" && expandedCard) collapseGame();
+  });
+
+  var swipeStart = null;
+  document.addEventListener("pointerdown", function (event) {
+    var tray = event.target.closest && event.target.closest("[data-feed-swipe]");
+    if (!tray) return;
+    swipeStart = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
+  });
+  document.addEventListener("pointerup", function (event) {
+    if (!swipeStart || event.pointerId !== swipeStart.pointerId) return;
+    var dy = event.clientY - swipeStart.y;
+    var dx = event.clientX - swipeStart.x;
+    swipeStart = null;
+    if (Math.abs(dy) > 44 && Math.abs(dy) > Math.abs(dx) * 1.2) {
+      event.preventDefault();
+      moveFeed(dy < 0 ? 1 : -1);
+    }
+  });
+  document.addEventListener("pointercancel", function () { swipeStart = null; });
+
+  // --- persistent follows and comments --------------------------------
+  function updateFollow(button) {
+    if (button.disabled) return;
+    button.disabled = true;
+    var active = !button.classList.contains("following");
+    fetch("/api/users/" + button.dataset.followUser + "/follow", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ active: active })
+    }).then(function (response) {
+      if (!response.ok) throw new Error("关注没有保存，请重试");
+      return response.json();
+    }).then(function (result) {
+      button.classList.toggle("following", result.active);
+      button.setAttribute("aria-pressed", result.active ? "true" : "false");
+      button.textContent = result.active ? "已关注" : "+ 关注";
+    }).catch(function (error) {
+      showToast(error.message);
+    }).finally(function () { button.disabled = false; });
+  }
+
+  var commentsModal = document.getElementById("commentsModal");
+  var commentsList = document.getElementById("commentsList");
+  var commentInput = document.getElementById("commentInput");
+  var commentsCard = null;
+
+  function commentNode(comment) {
+    var row = document.createElement("article");
+    row.className = "comment-item";
+    var avatar = document.createElement("img");
+    avatar.className = "comment-avatar";
+    avatar.src = comment.avatar;
+    avatar.alt = "";
+    var copy = document.createElement("div");
+    copy.className = "comment-copy";
+    // A plain link: the comment sheet is not part of the htmx view.
+    var author = document.createElement("a");
+    author.className = "comment-author";
+    author.href = "/u/" + encodeURIComponent(comment.handle);
+    author.textContent = comment.author;
+    var content = document.createElement("p");
+    content.textContent = comment.content;
+    copy.append(author, content);
+    var like = document.createElement("button");
+    like.type = "button";
+    like.className = "comment-like" + (comment.liked ? " active" : "");
+    like.dataset.commentLike = comment.id;
+    like.setAttribute("aria-pressed", comment.liked ? "true" : "false");
+    like.textContent = "♥ " + comment.likes;
+    row.append(avatar, copy, like);
+    return row;
+  }
+
+  function renderComments(comments) {
+    commentsList.replaceChildren();
+    if (!comments.length) {
+      var empty = document.createElement("p");
+      empty.className = "comment-empty";
+      empty.textContent = "还没有评论，来写第一条吧。";
+      commentsList.appendChild(empty);
+      return;
+    }
+    comments.forEach(function (comment) { commentsList.appendChild(commentNode(comment)); });
+  }
+
+  function openComments(card) {
+    commentsCard = card;
+    document.getElementById("commentsTitle").textContent = card.dataset.gameTitle + " · 评论";
+    commentsList.textContent = "正在加载…";
+    commentsModal.classList.add("open");
+    fetch("/api/works/" + card.dataset.gameId + "/comments")
+      .then(function (response) { if (!response.ok) throw new Error(); return response.json(); })
+      .then(function (payload) { renderComments(payload.comments); })
+      .catch(function () { commentsList.textContent = "评论没有加载，请重试。"; });
+  }
+
+  function closeComments() {
+    commentsModal.classList.remove("open");
+    commentsCard = null;
+    commentInput.value = "";
+  }
+
+  document.getElementById("commentsClose").addEventListener("click", closeComments);
+  commentsModal.addEventListener("click", function (event) {
+    if (event.target === commentsModal) closeComments();
+  });
+  document.getElementById("commentForm").addEventListener("submit", function (event) {
+    event.preventDefault();
+    if (!commentsCard || !commentInput.value.trim()) return;
+    fetch("/api/works/" + commentsCard.dataset.gameId + "/comments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: commentInput.value.trim() })
+    }).then(function (response) {
+      if (!response.ok) throw new Error("评论没有保存，请重试");
+      return response.json();
+    }).then(function (comment) {
+      var empty = commentsList.querySelector(".comment-empty");
+      if (empty) empty.remove();
+      commentsList.appendChild(commentNode(comment));
+      commentInput.value = "";
+      var count = commentsCard.querySelector("[data-social-count='comments']");
+      if (count) count.textContent = String(Number(count.textContent || 0) + 1);
+      commentsList.scrollTop = commentsList.scrollHeight;
+    }).catch(function (error) {
+      showToast(error.message);
+    });
+  });
+  document.addEventListener("click", function (event) {
+    var button = event.target.closest && event.target.closest("[data-comment-like]");
+    if (!button) return;
+    var active = !button.classList.contains("active");
+    fetch("/api/comments/" + button.dataset.commentLike + "/like", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ active: active })
+    }).then(function (response) {
+      if (!response.ok) throw new Error("点赞没有保存，请重试");
+      return response.json();
+    }).then(function (result) {
+      button.classList.toggle("active", result.active);
+      button.setAttribute("aria-pressed", result.active ? "true" : "false");
+      button.textContent = "♥ " + result.count;
+    }).catch(function (error) {
+      showToast(error.message);
+    });
+  });
+
+  document.body.addEventListener("htmx:afterSwap", function (event) {
+    if (event.detail.target.id === "viewport") initInlineGames();
   });
 
   syncChrome();
-  scrollToSharedGame();
+  initInlineGames();
 })();

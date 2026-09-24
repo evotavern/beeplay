@@ -660,15 +660,6 @@
     .import-progress { width: 100%; height: 8px; margin: -4px 0 0; accent-color: var(--lime-dark); }
     .import-status { min-height: 17px; margin: -5px 0 0; color: var(--muted); font-size: 12px; text-align: center; }
 
-    /* Game host. Full-bleed and above the nav, so the game gets the whole
-       viewport rather than a card-sized box with beeplay chrome around it.
-       Sits below .toast so notifications stay visible over a running game. */
-    #gameHost { position: fixed; inset: 0; z-index: 60; background: var(--ink); }
-    #gameHost iframe { width: 100%; height: 100%; border: 0; display: block; }
-    /* The card's own Ⅱ is underneath this overlay and unreachable, so the stop
-       control belongs to the host. */
-    #gameStop { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 14px); right: 14px; z-index: 1; width: 40px; height: 40px; border: 0; border-radius: 50%; background: rgba(23,27,26,0.62); color: var(--white); font-size: 20px; line-height: 1; }
-    #gameMute { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 62px); right: 14px; z-index: 1; width: 40px; height: 40px; border: 0; border-radius: 50%; background: rgba(23,27,26,0.62); color: var(--white); font-size: 17px; line-height: 1; }
     .toast { position: fixed; z-index: 80; left: 50%; bottom: 104px; transform: translate(-50%, 16px); padding: 12px 16px; color: var(--white); background: var(--ink); border-radius: 999px; font-size: 13px; font-weight: 800; opacity: 0; pointer-events: none; transition: opacity 180ms ease, transform 180ms ease; }
     .toast.show { opacity: 1; transform: translate(-50%, 0); }
     /* left: 50% would otherwise cap the width at half the screen and wrap longer toasts. */
@@ -1093,6 +1084,27 @@
       padding: 20px;
       border-radius: 28px;
     }
+    /* Double's create sheet: a compact bottom sheet of entry cards. */
+    #createModal { align-items: end; padding: 12px; }
+    #createModal .modal {
+      width: min(390px, calc(100vw - 24px)); max-height: calc(100dvh - 92px);
+      padding: 20px 14px 16px; border-radius: 28px;
+    }
+    #createModal .modal-head { gap: 12px; }
+    #createModal .modal-head h2 { font-size: 30px; line-height: 1.1; }
+    #createModal .modal-head p { margin-top: 6px; font-size: 12px; }
+    #createModal .close-button { flex: 0 0 auto; width: 34px; height: 34px; font-size: 19px; }
+    #createModal .modal-body { margin-top: 14px; }
+    #createModal .create-choices { display: grid; gap: 8px; }
+    #createModal .modal-choice {
+      min-height: 82px; gap: 12px; padding: 12px; border-radius: 18px; color: var(--ink);
+    }
+    #createModal .modal-choice:hover { transform: translateY(-1px); }
+    #createModal .choice-icon {
+      display: grid; flex: 0 0 auto; width: 48px; height: 48px; border-radius: 16px; font-size: 21px;
+    }
+    #createModal .modal-choice strong { font-size: 15px; }
+    #createModal .modal-choice > span:last-child > span { margin-top: 3px; font-size: 11px; line-height: 1.35; }
     @media (min-width: 431px) {
       body.mobile-preview .app-shell {
         min-height: calc(100dvh - 36px);
@@ -1103,18 +1115,228 @@
       }
     }
 
-    /* Feed lock while a game is running. These live at the end of the sheet on
-       purpose: body.mobile-preview .home-feed has equal specificity and is
-       declared later, so an earlier rule here would lose on source order. */
-    body.playing { overflow: hidden; }
-    body.playing .home-feed { scroll-snap-type: none; overflow-y: hidden; touch-action: none; }
-    /* Beeplay's chrome is hidden while a game runs. The game's own topbar and
-       its four-stage journey nav are the session's controls and progress
-       indicator, so ours would only duplicate and crowd them. Hiding the
-       bottom nav also removes the stray-tap route out of a running session. */
-    body.playing .topbar,
-    body.playing .bottom-nav,
-    body.playing .bottom-spacer { display: none; }
+    /* Double's mobile layout: a fixed game viewport above one connected,
+       swipeable information/action/navigation assembly. Games never receive
+       feed gestures; the lower tray owns switching. */
+    body.mobile-preview .topbar { display: none; }
+    body.mobile-preview .app-shell {
+      width: min(430px, 100%); min-height: 100dvh; margin: 0 auto; padding: 0;
+      border-radius: 0; box-shadow: none;
+    }
+    body.mobile-preview.feed-mode .page,
+    body.mobile-preview #homeView { height: 100dvh; min-height: 0; }
+    /* pageIn leaves a transform behind, which would make the expanded game's
+       position: fixed relative to the feed instead of the screen. */
+    body.mobile-preview #homeView { animation: none; }
+    body.mobile-preview .home-feed {
+      height: 100%; padding: 0; overflow: hidden; scroll-behavior: smooth;
+      overscroll-behavior: none; touch-action: none;
+    }
+    body.mobile-preview .game-card {
+      --tray-height: clamp(176px, 22dvh, 190px);
+      display: grid; grid-template-rows: minmax(0, 1fr) var(--tray-height);
+      width: 100%; height: 100dvh; min-height: 0; margin: 0;
+      overflow: hidden; border-radius: 0; background: var(--lime);
+      scroll-snap-align: none;
+    }
+    body.mobile-preview .game-card::after { display: none; }
+    .game-window {
+      position: relative; display: grid; min-height: 0; overflow: hidden;
+      place-items: center; background: #090b0b;
+    }
+    /* The stage is the size of the phone screen the game would get on its
+       own (set by app.js) and is scaled evenly to fit the window; it never
+       reflows or clips the game. */
+    .game-stage {
+      position: absolute; z-index: 2; top: 50%; left: 50%; width: 390px; height: 844px;
+      flex: none; overflow: hidden; background: #111;
+      transform: translate(-50%, -50%) scale(var(--game-scale, 1)); transform-origin: center;
+      box-shadow: 0 0 0 1px rgba(255,255,255,.04);
+    }
+    .game-window .game-frame {
+      display: block; width: 100%; height: 100%; border: 0; background: #111;
+    }
+    .game-expand, .game-collapse, .game-mute {
+      position: absolute; z-index: 4; display: grid; place-items: center; padding: 0;
+      border: 1px solid rgba(255,255,255,.18); color: #fff; background: rgba(9,11,11,.62);
+    }
+    .game-expand svg, .game-collapse svg, .game-mute svg {
+      width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2;
+      stroke-linecap: round; stroke-linejoin: round;
+    }
+    .game-expand { right: 6px; bottom: 6px; width: 34px; height: 34px; border-radius: 12px; }
+    .game-mute { right: 6px; bottom: 46px; width: 34px; height: 34px; border-radius: 12px; }
+    .game-mute .sound-off, .game-mute.muted .sound-on { display: none; }
+    .game-mute.muted .sound-off { display: inline; }
+    .game-collapse {
+      display: none; top: calc(4px + env(safe-area-inset-top)); left: 50%; width: 48px; height: 24px;
+      border-radius: 999px; transform: translateX(-50%);
+    }
+    /* Expanded: the same frame, unscaled, over the whole screen. */
+    .game-card.expanded .game-window { position: fixed; inset: 0; z-index: 85; }
+    .game-card.expanded .game-expand { display: none; }
+    .game-card.expanded .game-collapse { display: grid; }
+    /* Beside the collapse pill, clear of the game's own corner controls. */
+    .game-card.expanded .game-mute {
+      top: calc(4px + env(safe-area-inset-top)); right: auto; bottom: auto;
+      left: calc(50% + 30px); width: 24px; height: 24px; border-radius: 999px;
+    }
+    .game-card.expanded .game-mute svg { width: 13px; height: 13px; }
+    body.game-expanded .bottom-nav { display: none; }
+    .game-loading {
+      position: absolute; inset: 0; z-index: 1; display: grid; place-content: center;
+      justify-items: center; gap: 10px; color: var(--ink); background: var(--lime-light);
+    }
+    .game-loading span { font-size: 70px; }
+    .game-loading small { font-weight: 850; }
+    .game-loading[hidden] { display: none; }
+    .game-frame.loaded + .game-loading { display: none; }
+    .game-tray {
+      position: relative; z-index: 3; height: var(--tray-height); min-height: 0;
+      padding: 13px 14px calc(70px + env(safe-area-inset-bottom));
+      color: var(--white); background: var(--ink); touch-action: none;
+      user-select: none; cursor: grab;
+    }
+    .tray-handle {
+      position: absolute; top: 6px; left: 50%; width: 34px; height: 3px;
+      border-radius: 999px; background: rgba(255,255,255,.32); transform: translateX(-50%);
+    }
+    .game-tray:active { cursor: grabbing; }
+    .game-tray-copy { min-width: 0; padding-right: 2px; }
+    .game-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .game-title-row > div { min-width: 0; }
+    .game-title-row h2 {
+      margin: 0; overflow: hidden; color: var(--white); font-size: 20px;
+      line-height: 1.05; letter-spacing: -.05em; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .game-title-row p {
+      display: -webkit-box; margin: 3px 0 0; overflow: hidden;
+      color: rgba(255,255,255,.62); font-size: 10px; line-height: 1.25;
+      -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+    }
+    .follow-author {
+      flex: 0 0 auto; min-height: 28px; padding: 0 10px; border: 1px solid rgba(255,255,255,.34);
+      border-radius: 999px; background: transparent; color: var(--white); font-size: 11px; font-weight: 900;
+    }
+    .follow-author.following { border-color: var(--lime); background: var(--lime); color: var(--ink); }
+    .game-tray .game-author { display: flex; align-items: center; gap: 4px; margin-top: 5px; color: rgba(255,255,255,.76); font-size: 10px; }
+    /* The author as main's author_link renders it: a photo and name linking
+       to their page, sized for the tray. */
+    body.mobile-preview .game-tray .tray-author {
+      display: inline-flex; align-items: center; gap: 5px; min-width: 0;
+      color: var(--white); font-weight: 850; text-decoration: none;
+    }
+    body.mobile-preview .game-tray .tray-author img { width: 16px; height: 16px; border-radius: 50%; object-fit: cover; }
+    .author-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--lime); box-shadow: inset 0 0 0 2px rgba(255,255,255,.3); }
+    .game-tray-actions {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+      margin-top: 7px; padding: 3px; border-radius: 999px; background: rgba(255,255,255,.07);
+    }
+    .tray-action {
+      display: flex; min-width: 0; height: 30px; align-items: center; justify-content: center; gap: 5px;
+      border: 0; border-radius: 999px; background: transparent; color: rgba(255,255,255,.82);
+      font-size: 14px;
+    }
+    .tray-action svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .tray-action:first-child svg { fill: transparent; }
+    .tray-action:first-child.active svg { fill: currentColor; }
+    .tray-action small { overflow: hidden; color: inherit; font-size: 9px; font-weight: 850; text-overflow: ellipsis; }
+    .tray-action.active { background: var(--lime); color: var(--ink); }
+    /* One bottom nav on every page: solid, so it reads the same over the dark
+       feed tray and over the light pages, and laid out the same everywhere. */
+    body.mobile-preview .bottom-nav {
+      width: min(402px, calc(100% - 20px)); bottom: max(7px, env(safe-area-inset-bottom));
+      padding: 5px; border: 1px solid rgba(255,255,255,.09); background: rgba(23,27,26,0.94);
+      box-shadow: 0 12px 30px rgba(23,27,26,0.22); backdrop-filter: none;
+    }
+    body.mobile-preview .nav-items { width: 100%; justify-content: space-between; }
+    body.mobile-preview .nav-item { height: 38px; }
+    body.mobile-preview .floating-create { width: 44px; height: 44px; font-size: 25px; box-shadow: none; }
+    /* The feed tray already reserves room for the nav; other pages scroll
+       their last row clear of it. */
+    body.mobile-preview.feed-mode .bottom-spacer { display: none; }
+
+    .comments-backdrop {
+      position: fixed; inset: 0; z-index: 90; display: none; align-items: flex-end;
+      justify-content: center; padding: 10px; background: rgba(23,27,26,.54);
+    }
+    .comments-backdrop.open { display: flex; }
+    .comments-panel {
+      display: grid; grid-template-rows: auto minmax(90px, 1fr) auto;
+      width: min(410px, 100%); max-height: min(72dvh, 640px); overflow: hidden;
+      border-radius: 28px; background: var(--cream); box-shadow: var(--shadow);
+    }
+    .comments-head { display: flex; align-items: center; justify-content: space-between; padding: 18px; border-bottom: 1px solid var(--line); }
+    .comments-head h2 { margin: 0; font-size: 20px; }
+    .comments-close { width: 34px; height: 34px; border: 0; border-radius: 50%; background: var(--white); font-size: 20px; }
+    .comments-list { display: grid; gap: 12px; overflow: auto; padding: 16px 18px; }
+    .comment-item { display: grid; grid-template-columns: 34px minmax(0,1fr) auto; gap: 10px; align-items: start; }
+    .comment-avatar { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; }
+    .comment-author { color: inherit; font-size: 12px; font-weight: 850; text-decoration: none; }
+    .comment-copy p { margin: 3px 0 0; font-size: 13px; line-height: 1.4; }
+    .comment-like { border: 0; background: transparent; color: var(--muted); font-size: 11px; }
+    .comment-like.active { color: #d84d66; }
+    .comment-empty { padding: 28px 10px; color: var(--muted); text-align: center; }
+    .comment-form { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 12px; border-top: 1px solid var(--line); }
+    .comment-input { min-width: 0; height: 42px; padding: 0 14px; border: 1px solid var(--line); border-radius: 999px; background: #fff; }
+    .comment-submit { min-width: 62px; border: 0; border-radius: 999px; background: var(--ink); color: #fff; font-weight: 850; }
+
+    @media (max-height: 700px) {
+      body.mobile-preview .game-card { --tray-height: 164px; }
+      .game-tray { padding-top: 12px; }
+      .game-title-row h2 { font-size: 18px; }
+      .game-title-row p { -webkit-line-clamp: 1; }
+      .game-tray .game-author { margin-top: 3px; }
+      .game-tray-actions { margin-top: 5px; }
+    }
+    .work-card[hx-get] { cursor: pointer; }
+    .discover-search-top { padding: 16px 14px 10px; }
+    .discover-search-top .search-box { width: 100%; }
+    body.mobile-preview #discoverView { padding: 0 14px; }
+    body.mobile-preview #discoverView .discover-search-top { margin: 0 -14px; }
+    body.mobile-preview #discoverView .feature-card { min-height: 330px; }
+    body.mobile-preview #discoverView .category-section { margin-top: 22px; }
+    body.mobile-preview #discoverView .section-heading p { margin-top: 3px; }
+    body.mobile-preview #discoverView .category-row {
+      flex-wrap: nowrap; margin-right: -14px; padding-right: 14px; overflow-x: auto;
+      scrollbar-width: none;
+    }
+    body.mobile-preview #discoverView .category-row::-webkit-scrollbar { display: none; }
+    body.mobile-preview #discoverView .work-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+    body.mobile-preview .game-tray .game-author::before { display: none; }
+    body.mobile-preview #profileView { padding: 18px 16px 0; }
+    /* The shell has no padding in this layout (the feed is edge to edge), so
+       every other page brings its own; the top bar is hidden too. */
+    body.mobile-preview #messagesView,
+    body.mobile-preview #userView,
+    body.mobile-preview #loginView,
+    body.mobile-preview #resetView,
+    body.mobile-preview #createView { padding: calc(18px + env(safe-area-inset-top)) 16px 0; }
+    body.mobile-preview #profileView .profile-layout { display: block; }
+    body.mobile-preview #profileView .profile-card {
+      display: grid; grid-template-columns: 86px minmax(0,1fr); gap: 12px 16px;
+      padding: 16px; align-items: center; text-align: left; border-radius: 28px;
+    }
+    body.mobile-preview #profileView .profile-avatar {
+      grid-row: 1 / span 2; width: 86px; height: 86px; border-width: 6px; border-radius: 28px;
+    }
+    body.mobile-preview #profileView .profile-card h2 { margin: 0; font-size: 27px; }
+    body.mobile-preview #profileView .profile-bio { margin: 8px 0 0; font-size: 12px; }
+    body.mobile-preview #profileView .profile-actions { grid-column: 1 / -1; display: flex; gap: 8px; }
+    body.mobile-preview #profileView .profile-actions > * { flex: 1; }
+    body.mobile-preview #profileView .profile-stats,
+    body.mobile-preview #profileView .account-box { grid-column: 1 / -1; }
+    body.mobile-preview #profileView .profile-content { margin-top: 16px; }
+    body.mobile-preview #profileView .tabs {
+      display: grid; grid-template-columns: repeat(4,1fr); gap: 5px; padding: 5px; width: 100%;
+      border-radius: 20px; background: rgba(255,255,255,.36);
+    }
+    body.mobile-preview #profileView .tab {
+      display: grid; min-width: 0; gap: 3px; justify-items: center; padding: 8px 3px;
+      border-radius: 15px; font-size: 10px;
+    }
+    body.mobile-preview #profileView .tab span { font-size: 16px; }
+    body.mobile-preview #profileView .profile-work-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin-top: 12px; }
   </style>
   <link rel="stylesheet" href="{{ asset('css/generation.css') }}">
   <link rel="stylesheet" href="{{ asset('css/account.css') }}">
@@ -1156,10 +1378,9 @@
          a snapshot over the whole body: app.js re-executes and registers a
          second set of delegated listeners (every click then fires twice, so
          like/save toggle on then off and never stick), while the first set is
-         left pointing at a detached #gameHost, #createModal and #toast. The
-         snapshot also deserializes a stale <iframe>, so the next play mounts a
-         second copy of the game beside a zombie. Restoring only what htmx owns
-         leaves the body-level hosts — the whole point of them — untouched. -->
+         left pointing at a detached #createModal and #toast. Restoring only what
+         htmx owns leaves the body-level elements untouched; app.js sets up the
+         restored feed's game frames again. -->
     <main class="page" id="viewport" hx-history-elt>
 {% include "views/" ~ view ~ ".html" %}
     </main>
@@ -1186,10 +1407,8 @@
       <div class="modal-head"><div><h2 id="createModalTitle">你想玩什么？</h2><p id="createModalDescription">选择一个入口，马上开始你的 Bee。</p></div><button class="close-button" id="closeModal" aria-label="关闭">×</button></div>
       <div class="modal-body">
         <div class="create-choices" id="createChoices">
-          <button class="modal-choice" data-modal-choice="idea"><span class="choice-icon">✦</span><span><strong>从一个想法开始</strong><span>输入一句话，让 Beeplay 帮你建立第一个版本。</span></span></button>
-          <button class="modal-choice" data-modal-choice="habit"><span class="choice-icon">☀</span><span><strong>做一个习惯计划</strong><span>把想坚持的事变成每天都想打开的小任务。</span></span></button>
-          <button class="modal-choice" data-modal-choice="remix"><span class="choice-icon">↗</span><span><strong>Remix 一个作品</strong><span>从社区里的灵感出发，做成属于你的版本。</span></span></button>
-          <button class="modal-choice" data-modal-choice="import"><span class="choice-icon">▣</span><span><strong>导入一个完成的小游戏</strong><span>带入已有的 HTML 游戏，加入首页游戏流。</span></span></button>
+          <button class="modal-choice" data-modal-choice="idea"><span class="choice-icon" aria-hidden="true">✦</span><span><strong>从一个想法开始</strong><span>输入一句话，让 Beeplay 帮你建立第一个版本</span></span></button>
+          <button class="modal-choice" data-modal-choice="import"><span class="choice-icon" aria-hidden="true">▣</span><span><strong>导入一个完成的小游戏</strong><span>带入已有的 HTML 游戏，加入首页游戏流</span></span></button>
         </div>
         <form class="import-game-form" id="importGameForm" hidden>
           <input class="import-file-input" id="importGameZip" type="file" accept=".zip,application/zip" />
@@ -1217,14 +1436,15 @@
     </div>
   </div>
 
-  <!-- Persistent game host. Body-level on purpose: anything inside #viewport is
-       destroyed by an htmx nav swap, which would kill a session mid-brew. -->
-  <div id="gameHost" hidden>
-    <!-- Pauses rather than ends: the iframe stays mounted and keeps its game
-         state, the host just hides. Ending a session outright is a separate,
-         deliberate action (switching to another game). -->
-    <button id="gameStop" aria-label="暂停并返回信息流" title="暂停并返回">×</button>
-    <button id="gameMute" aria-label="静音" title="静音">🔊</button>
+  <div class="comments-backdrop" id="commentsModal" role="dialog" aria-modal="true" aria-labelledby="commentsTitle">
+    <section class="comments-panel">
+      <header class="comments-head"><h2 id="commentsTitle">评论</h2><button class="comments-close" id="commentsClose" aria-label="关闭评论">×</button></header>
+      <div class="comments-list" id="commentsList" aria-live="polite"></div>
+      <form class="comment-form" id="commentForm">
+        <input class="comment-input" id="commentInput" maxlength="500" placeholder="写下你的评论…" autocomplete="off" />
+        <button class="comment-submit" type="submit">发送</button>
+      </form>
+    </section>
   </div>
 
   <!-- Profile and password editors, fetched fresh into here when opened.

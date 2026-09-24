@@ -183,6 +183,40 @@ class WorkShare(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)
 
 
+class UserFollow(Base):
+    """A follow between two of the eight claimed demo identities."""
+
+    __tablename__ = "user_follows"
+
+    follower_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    followed_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class WorkComment(Base):
+    """A persisted comment on a live work."""
+
+    __tablename__ = "work_comments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    work_id: Mapped[int] = mapped_column(ForeignKey("works.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)
+
+
+class CommentLike(Base):
+    """A demo identity's like on a comment."""
+
+    __tablename__ = "comment_likes"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    comment_id: Mapped[int] = mapped_column(
+        ForeignKey("work_comments.id"), primary_key=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
 class WorkEvent(Base):
     """Append-only audit trail of every change to a work. Never pruned."""
 

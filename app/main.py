@@ -1,4 +1,6 @@
 import hashlib
+import html
+import re
 from functools import lru_cache
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -22,6 +24,9 @@ from app.generation_routes import router as generation_router
 from app.identity import account, current_user, ensure_user
 from app.models import User
 from app.repository import (
+    add_comment,
+    comment_payload,
+    comments_for_work,
     discover_works,
     feed_games,
     liked_works,
@@ -33,6 +38,8 @@ from app.repository import (
     saved_count,
     saved_works,
     set_like,
+    set_comment_like,
+    set_follow,
     set_save,
     user_by_handle,
     viewed_works,
@@ -167,6 +174,23 @@ templates.env.globals["user_avatar"] = user_avatar
 templates.env.globals["avatar_fills"] = AVATAR_FILLS
 templates.env.globals["asset"] = asset
 templates.env.globals["load_timeout_s"] = config.LOAD_TIMEOUT_S
+
+
+@lru_cache
+def display_title(artifact: str | None, stored: str) -> str:
+    """Recover legacy rows that accidentally stored the entry filename."""
+    if stored.strip().lower() not in {"index.html", "index.htm"} or not artifact:
+        return stored
+    entry = GAMES_DIR / artifact / "index.html"
+    try:
+        source = entry.read_text(errors="ignore")[:64_000]
+    except OSError:
+        return stored
+    match = re.search(r"<title[^>]*>(.*?)</title>", source, re.IGNORECASE | re.DOTALL)
+    return html.unescape(re.sub(r"\s+", " ", match.group(1))).strip() if match else stored
+
+
+templates.env.globals["display_title"] = display_title
 
 
 def render_view(request: Request, view: str, **context) -> HTMLResponse:
@@ -398,6 +422,10 @@ class SocialToggle(BaseModel):
     active: bool
 
 
+class CommentCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=500)
+
+
 class SocialEvent(BaseModel):
     event_id: str = Field(min_length=8, max_length=64)
 
@@ -432,6 +460,63 @@ def update_save(
     except LookupError as error:
         raise _social_not_found(error) from error
     return {"active": active}
+
+
+@app.post("/api/users/{user_id}/follow")
+def update_follow(
+    user_id: int,
+    change: SocialToggle,
+    session: Session = Depends(get_session),
+    user: User = Depends(account),
+) -> dict:
+    try:
+        active = set_follow(session, user, user_id, change.active)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return {"active": active}
+
+
+@app.get("/api/works/{work_id}/comments")
+def get_comments(
+    work_id: int,
+    session: Session = Depends(get_session),
+    user: User | None = Depends(current_user),
+) -> dict:
+    try:
+        comments = comments_for_work(session, user, work_id)
+    except LookupError as error:
+        raise _social_not_found(error) from error
+    return {"comments": comments}
+
+
+@app.post("/api/works/{work_id}/comments", status_code=201)
+def create_comment(
+    work_id: int,
+    payload: CommentCreate,
+    session: Session = Depends(get_session),
+    user: User = Depends(account),
+) -> dict:
+    if not payload.content.strip():
+        raise HTTPException(status_code=422, detail="评论不能为空")
+    try:
+        comment = add_comment(session, user, work_id, payload.content)
+    except LookupError as error:
+        raise _social_not_found(error) from error
+    return comment_payload(comment, user, likes=0, liked=False)
+
+
+@app.post("/api/comments/{comment_id}/like")
+def update_comment_like(
+    comment_id: int,
+    change: SocialToggle,
+    session: Session = Depends(get_session),
+    user: User = Depends(account),
+) -> dict:
+    try:
+        active, count = set_comment_like(session, user, comment_id, change.active)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return {"active": active, "count": count}
 
 
 @app.post("/api/works/{work_id}/view")

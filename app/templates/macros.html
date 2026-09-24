@@ -5,7 +5,9 @@
 {%- else -%}<span class="{{ class_name }}">{{ work.author }}</span>{%- endif -%}
 {%- endmacro %}
 {% macro work_card(work, searchable=False) -%}
-<article class="work-card"{% if searchable %} data-work-title="{{ (work.title ~ ' ' ~ (work.owner.name if work.owner else work.author))|lower }}"{% endif %}>
+{#- A live card opens the feed on its game, like the featured card's button.
+    The author link inside keeps its own click. -#}
+<article class="work-card"{% if work.status == "live" and work.artifact_hash %} hx-get="/?game={{ work.artifact_hash }}" hx-trigger="click[!event.target.closest('a')], keyup[key=='Enter']" role="link" tabindex="0" aria-label="试玩 {{ work.title }}"{% endif %}{% if searchable %} data-work-title="{{ (work.title ~ ' ' ~ (work.owner.name if work.owner else work.author))|lower }}"{% endif %}>
   <div class="work-art {{ work.art }}"><span>{{ work.emoji }}</span></div>
   <div class="work-copy"><strong>{{ work.title }}</strong>{{ author_link(work) }}<div class="work-stats"><span>◉ {{ work.view_count }}</span><span>♥ {{ work.like_count }}</span></div>
   {%- if work.status == "hidden" %}<p class="work-flag" role="status">哎呀，这个游戏总是崩溃，先从首页下架啦 🐝💥 快去找黑客松工作人员，我们一起把它修好！</p>

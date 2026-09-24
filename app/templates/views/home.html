@@ -1,18 +1,32 @@
       {% from "macros.html" import author_link %}
       <section class="view active" id="homeView" data-view="home">
-        <div class="home-feed" id="homeFeed" aria-label="可上下滑动的游戏流">
+        <div class="home-feed" id="homeFeed" aria-label="从下方信息栏上下滑动切换游戏">
           {% for game in games %}
-          <article class="game-card game-{{ game.art }}" data-game-id="{{ game.id }}" data-game-title="{{ game.title }}" data-artifact="{{ game.artifact_hash }}">
-            <div class="game-card-head"><span class="game-badge">FOR YOU · {{ '%02d'|format(loop.index) }}</span><button class="game-more" data-toast="更多游戏选项已打开" aria-label="更多选项">⋯</button></div>
-            <div class="game-scene" aria-hidden="true">
-              <span class="scene-sun"></span><span class="scene-ground"></span><span class="scene-piece emoji">{{ game.emoji }}</span>
+          {% set title = display_title(game.artifact_hash, game.title) %}
+          <article class="game-card" data-game-id="{{ game.id }}" data-game-title="{{ title }}" data-artifact="{{ game.artifact_hash }}" data-owner-id="{{ game.user_id or '' }}">
+            <div class="game-window" aria-label="{{ title }} 游戏窗口">
+              <div class="game-stage">
+                <iframe class="game-frame" {% if loop.first %}src="/games/{{ game.artifact_hash }}/index.html"{% else %}data-src="/games/{{ game.artifact_hash }}/index.html"{% endif %} sandbox="allow-scripts" allow="autoplay" title="{{ title }}"></iframe>
+              </div>
+              <div class="game-loading" aria-hidden="true"><span>{{ game.emoji }}</span><small>正在进入 {{ title }}</small></div>
+              <button class="game-mute" type="button" data-game-mute aria-pressed="false" aria-label="静音"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path class="sound-on" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path class="sound-off" d="m16 9 6 6m0-6-6 6"/></svg></button>
+              <button class="game-expand" type="button" data-game-expand aria-label="全屏玩 {{ title }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+              <button class="game-collapse" type="button" data-game-collapse aria-label="退出全屏，回到游戏流"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
             </div>
-            <div class="game-copy"><h2>{{ game.title }}</h2><p>{{ game.category }} · 互动小游戏</p>{{ author_link(game, "game-author") }}</div>
-            <div class="game-actions">
-              <button class="game-action play-game" data-game-action="play" aria-label="试玩 {{ game.title }}">▶</button>
-              <button class="game-action{% if game.liked_by_viewer %} active{% endif %}" data-game-action="like" aria-pressed="{{ 'true' if game.liked_by_viewer else 'false' }}" aria-label="喜欢 {{ game.title }}">♥<small data-social-count="likes">{{ game.like_count }}</small></button>
-              <button class="game-action{% if game.saved_by_viewer %} active{% endif %}" data-game-action="save" aria-pressed="{{ 'true' if game.saved_by_viewer else 'false' }}" aria-label="收藏 {{ game.title }}">▣</button>
-              <button class="game-action" data-game-action="share" aria-label="分享 {{ game.title }}">↗<small data-social-count="shares">{{ game.share_count }}</small></button>
+            <div class="game-tray" data-feed-swipe aria-label="{{ title }} 信息和切换区域">
+              <div class="tray-handle" aria-hidden="true"></div>
+              <div class="game-tray-copy">
+                <div class="game-title-row"><div><h2>{{ title }}</h2><p>{{ game.description or (game.category ~ ' · 互动小游戏') }}</p></div>
+                  {% if game.owner and game.owner.slug != "beeplay" and (not current_user or current_user.id != game.user_id) %}<button class="follow-author{% if game.followed_by_viewer %} following{% endif %}" data-follow-user="{{ game.user_id }}" aria-pressed="{{ 'true' if game.followed_by_viewer else 'false' }}">{{ '已关注' if game.followed_by_viewer else '+ 关注' }}</button>{% endif %}
+                </div>
+                <div class="game-author">{{ author_link(game, "tray-author") }}<span>· {{ game.category }}</span></div>
+              </div>
+              <div class="game-tray-actions" aria-label="游戏操作">
+                <button class="tray-action{% if game.liked_by_viewer %} active{% endif %}" data-game-action="like" aria-pressed="{{ 'true' if game.liked_by_viewer else 'false' }}" aria-label="喜欢 {{ title }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"/></svg><small data-social-count="likes">{{ game.like_count }}</small></button>
+                <button class="tray-action" data-game-action="comments" aria-label="评论 {{ title }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z"/></svg><small data-social-count="comments">{{ game.comment_count }}</small></button>
+                <button class="tray-action{% if game.saved_by_viewer %} active{% endif %}" data-game-action="save" aria-pressed="{{ 'true' if game.saved_by_viewer else 'false' }}" aria-label="收藏 {{ title }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z"/></svg><small>收藏</small></button>
+                <button class="tray-action" data-game-action="share" aria-label="分享 {{ title }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0-12 5 5m-5-5L7 8M5 12v8h14v-8"/></svg><small data-social-count="shares">{{ game.share_count }}</small></button>
+              </div>
             </div>
           </article>
           {% else %}
