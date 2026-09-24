@@ -25,18 +25,49 @@ Existing HTTP claim cookies must be claimed again after the cutover.
 
 ## Releasing
 
-Release only what is on `main`, from a clean export, so nothing uncommitted or
-unmerged reaches players:
+A person ships a green pull request from a laptop, from any checkout:
 
 ```bash
-D=$(mktemp -d) && git fetch -q origin && git archive origin/main | tar -x -C "$D" && bash "$D/deploy/push.sh" --dry-run
+deploy/push.sh 12             # briefing, then type "ship": merges PR #12 and releases it
+deploy/push.sh --dry-run 12   # the briefing and the server's checks; nothing changes
+deploy/push.sh main           # releases main as it is, e.g. after merging on GitHub
+deploy/push.sh rollback       # the previous release back, and a revert PR
+deploy/push.sh setup          # once per server: beeplay-release and its deploy key
 ```
 
-`--dry-run` runs every check below and changes nothing live. If it passes,
-run the same command without `--dry-run`.
+`push.sh` first prints a one-screen briefing: what ships, what is live (and
+since when), what changes, a short summary and what to test (written by Claude
+from the diff), other open PRs touching the same files, worktrees on this
+laptop with unpushed work and the sessions running in them, and errors in prod
+since the last release.
 
-`push.sh` copies the tree to `/root/beeplay-release/` and runs
-`deploy/release.sh` there, which:
+- **Hard stops, which nothing overrides** (`rollback` is the way out):
+  - the tests failed, are running or never ran (only a warning until CI exists);
+  - the PR is behind `main`, based on another PR, a draft, conflicting or closed;
+  - `main` does not contain the live commit, so releasing would take back what
+    players have;
+  - another release is running;
+  - what is live can't be told;
+  - the server has no deploy key yet.
+- **Warnings** you acknowledge by typing `ship`: migrations, dependency or
+  server changes, a large diff, overlapping PRs, unpushed work elsewhere, errors
+  in prod, or a rollback whose revert has not been merged.
+
+`ship` is read from the terminal, not a pipe, so agents cannot release: they
+prepare pull requests and say when one is ready. `push.sh` then merges the PR
+with a merge commit (never squash: the checks follow commit ids) and asks the
+server to release exactly that commit.
+
+On the server, `beeplay-release` downloads the commit straight from GitHub with
+a read-only deploy key, so the laptop's connection to GitHub is not in the way.
+It refuses anything that is not on `main` or does not contain the live commit,
+one release at a time, writes `version.json` into the release (served, uncached,
+at https://beeplay.top/version), logs to `/var/lib/beeplay/logs/releases.jsonl`,
+runs that commit's own `deploy/release.sh`, and after a good release posts what
+to test to the 🐝蜂玩BeePlay group, in Chinese, for Double. The last three
+releases stay in `/var/lib/beeplay-release/releases/`.
+
+`deploy/release.sh`:
 
 - installs `/etc/beeplay/beeplay.env` if missing (never overwrites it)
 - **rehearses before touching anything live:** in `/srv/beeplay.next`, the new
@@ -49,7 +80,7 @@ run the same command without `--dry-run`.
 - syncs code with its file modes set on the server (Caddy must be able to read
   everything, whatever the modes of the pushed tree), installs dependencies,
   the systemd units, the BeePlay Caddy site, `/usr/local/bin/beeplay-ops`,
-  `beeplay-check` and `beeplay-notify`
+  `beeplay-check`, `beeplay-notify` and `beeplay-release`
 - stops the app, migrates the schema (`beeplay-ops migrate`), gives every
   game the current reporter and sandbox shim (`beeplay-ops refresh-reporter`;
   a changed `assets/js/game-reporter.js` republishes each game under a new
@@ -66,6 +97,17 @@ run on it, so the backup has to come back too, losing what players wrote since.
 The script says how many minutes that is and does it only if you type
 `restore`; otherwise the new release stays and it prints the steps to go back
 by hand. A failed release is kept at `/srv/beeplay.failed`.
+
+`deploy/push.sh rollback` does the same for the last good release, when a
+problem shows up later: the previous code, unit and Caddy site come back, the
+database backup too only if that release moved the schema version (and only
+after you type `restore`), the group hears it was rolled back, and a revert PR
+opens on GitHub so `main` stops carrying the change. The rolled-back release is
+kept at `/srv/beeplay.rolled-back`.
+
+If GitHub cannot be reached from the server either, re-run the newest export
+by hand: `ssh evotavern`, then
+`bash /var/lib/beeplay-release/releases/<newest>/deploy/release.sh`.
 
 Schema changes are Alembic migrations in `migrations/versions/`. The app also
 migrates on startup, so a plain restart is always safe.

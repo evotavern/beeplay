@@ -11,7 +11,9 @@ for script in deploy/release.sh deploy/setup-caddy.sh deploy/push.sh deploy/test
     deploy/beeplay-check deploy/beeplay-ops deploy/local.sh; do
   bash -n "$script"
 done
-python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' deploy/beeplay-notify
+for tool in deploy/beeplay-notify deploy/beeplay-release deploy/push.py; do
+  python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' "$tool"
+done
 
 if command -v caddy >/dev/null; then
   work=$(mktemp -d)

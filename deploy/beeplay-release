@@ -1,0 +1,429 @@
+#!/usr/bin/env python3
+"""Installed as /usr/local/bin/beeplay-release: the only way code reaches
+/srv/beeplay. deploy/push.sh on a laptop calls it over ssh. It downloads the
+commit straight from GitHub with a read-only deploy key, so the laptop's own
+connection to GitHub is not in the way, and runs that commit's
+deploy/release.sh on it, one release at a time.
+
+    beeplay-release status                what is live, as JSON
+    beeplay-release release SHA [--pr N] [--by WHO] [--notes-b64 TEXT] [--dry-run]
+    beeplay-release rollback [--by WHO]   the previous release back
+    beeplay-release setup                 once: the deploy key; prints its public half
+    beeplay-release check-access          can this server read the repository?
+
+A release must be on main and must contain the commit that is live, so it
+never takes back what players already have. --dry-run may name any commit,
+e.g. a pull request's head, since it changes nothing live.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import datetime
+import fcntl
+import hashlib
+import json
+import os
+import pwd
+import shutil
+import sqlite3
+import subprocess
+import sys
+import time
+import urllib.request
+from pathlib import Path
+
+REPO = "git@github.com:evotavern/beeplay.git"
+APP = Path("/srv/beeplay")
+PREV = Path("/srv/beeplay.prev")
+ROOT = Path("/var/lib/beeplay-release")
+MIRROR = ROOT / "mirror.git"
+RELEASES = ROOT / "releases"
+KNOWN_HOSTS = ROOT / "known_hosts"
+KEY = Path("/root/.ssh/beeplay_deploy")
+LOCK = Path("/run/lock/beeplay-release.lock")
+LOG = Path("/var/lib/beeplay/logs/releases.jsonl")
+EVENTS = Path("/var/lib/beeplay/logs/events.jsonl")
+DB = Path("/var/lib/beeplay/beeplay.db")
+BACKUPS = Path("/var/backups/beeplay")
+KEEP = 3  # release directories kept for inspection
+# Names release.sh's rsync leaves out at any depth, and what runs create:
+# never compared between a commit and /srv/beeplay.
+UNSYNCED = {".git", ".venv", ".cache", ".local", ".env", "node_modules", "games", "failed",
+            "logs", "avatars", "__pycache__"}
+
+
+def synced(path: str) -> bool:
+    parts = path.split("/")
+    return not (UNSYNCED.intersection(parts) or parts[-1].startswith("beeplay.db")
+                or parts[-1].endswith(".pyc") or path == "version.json")
+
+
+def now() -> datetime.datetime:
+    return datetime.datetime.now().astimezone()
+
+
+def say(message: str) -> None:
+    print(message, file=sys.stderr, flush=True)
+
+
+def is_ancestor(commit: str, of: str) -> bool:
+    return subprocess.run(["git", "merge-base", "--is-ancestor", commit, of], cwd=MIRROR,
+                          capture_output=True).returncode == 0
+
+
+def git(*args: str, cwd: Path | None = None, check: bool = True) -> str:
+    env = {**os.environ, "GIT_SSH_COMMAND": (
+        f"ssh -i {KEY} -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=15"
+        f" -o StrictHostKeyChecking=yes -o UserKnownHostsFile={KNOWN_HOSTS}")}
+    result = subprocess.run(["git", *args], cwd=cwd, env=env, capture_output=True, text=True)
+    if check and result.returncode != 0:
+        raise SystemExit(f"git {' '.join(args)}: {result.stderr.strip()}")
+    return result.stdout.strip()
+
+
+# --- what is live -------------------------------------------------------
+
+def read_version(tree: Path) -> dict | None:
+    try:
+        return json.loads((tree / "version.json").read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def blob_id(data: bytes) -> str:
+    """The id git gives this content: files compare to commits without git."""
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def tree_files(tree: Path) -> dict[str, str]:
+    """Every file under tree that came from git, as path -> blob id. Git
+    stores a symlink as a file holding its target, so that is compared."""
+    files = {}
+    for directory, subdirs, names in os.walk(tree):
+        here = Path(directory)
+        prefix = "" if here == tree else here.relative_to(tree).as_posix() + "/"
+        subdirs[:] = [d for d in subdirs if d not in UNSYNCED]
+        for name in [d for d in subdirs if (here / d).is_symlink()]:
+            subdirs.remove(name)
+            names.append(name)
+        for name in names:
+            if not synced(prefix + name):
+                continue
+            path = here / name
+            data = os.readlink(path).encode() if path.is_symlink() else path.read_bytes()
+            files[prefix + name] = blob_id(data)
+    return files
+
+
+def commit_files(commit: str, mirror: Path = MIRROR) -> dict[str, str]:
+    listing = git("ls-tree", "-r", "-z", "--full-tree", commit, cwd=mirror)
+    files = {}
+    for entry in filter(None, listing.split("\0")):
+        meta, path = entry.split("\t", 1)
+        _mode, kind, blob = meta.split()
+        if kind == "blob" and synced(path):
+            files[path] = blob
+    return files
+
+
+def whats_live(tree: Path, candidates: list[str], mirror: Path = MIRROR) -> str | None:
+    """The first candidate commit whose files are exactly those in tree."""
+    live = tree_files(tree)
+    for commit in candidates:
+        if commit_files(commit, mirror) == live:
+            return commit
+    return None
+
+
+def live_commit() -> tuple[str | None, str]:
+    """The live commit, and how it is known."""
+    version = read_version(APP)
+    if version and version.get("commit"):
+        return version["commit"], "version.json"
+    # Released before releases were stamped: find the commit by its files.
+    if not KEY.exists():
+        return None, "unknown: no version.json, and no deploy key to compare commits"
+    fetch()
+    history = git("rev-list", "--first-parent", "--max-count=60", "refs/heads/main", cwd=MIRROR).split()
+    found = whats_live(APP, history)
+    return (found, "matched by its files") if found else (None, "unknown: no commit on main matches the live files")
+
+
+def db_version(db: Path = DB) -> str:
+    try:
+        with sqlite3.connect(f"file:{db}?mode=ro", uri=True) as connection:
+            row = connection.execute("select version_num from alembic_version").fetchone()
+            return row[0] if row else "none"
+    except sqlite3.Error:
+        return "none"
+
+
+def errors_since(since: str | None, events: Path = EVENTS) -> dict:
+    counts = {"client_error": 0, "server_error": 0, "health_fail": 0, "play_ok": 0}
+    if not since or not events.exists():
+        return counts
+    cutoff = datetime.datetime.fromisoformat(since).astimezone(datetime.timezone.utc)
+    with events.open(encoding="utf-8", errors="replace") as lines:
+        for line in lines:
+            try:
+                event = json.loads(line)
+                at = datetime.datetime.fromisoformat(event["at"].replace("Z", "+00:00"))
+            except (ValueError, KeyError, TypeError):
+                continue
+            if at < cutoff:
+                continue
+            name = event.get("event")
+            if name == "client_error" and event.get("kind") != "shown":
+                counts["client_error"] += 1
+            elif name == "http_error" and str(event.get("status", "")).startswith("5"):
+                counts["server_error"] += 1
+            elif name in ("health_fail", "play_ok"):
+                counts[name] += 1
+    return counts
+
+
+def history(log: Path = LOG) -> list[dict]:
+    try:
+        return [json.loads(line) for line in log.read_text().splitlines() if line.strip()]
+    except (OSError, ValueError):
+        return []
+
+
+def record(entry: dict, log: Path = LOG) -> None:
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with log.open("a", encoding="utf-8") as out:
+        out.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+# --- one release at a time ----------------------------------------------
+
+class Lock:
+    def __enter__(self):
+        LOCK.parent.mkdir(parents=True, exist_ok=True)
+        self.file = LOCK.open("a+")
+        try:
+            fcntl.flock(self.file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            self.file.seek(0)
+            raise SystemExit(f"another release is running: {self.file.read().strip() or '?'}")
+        self.file.seek(0)
+        self.file.truncate()
+        self.file.write(f"{' '.join(sys.argv[1:3])} since {now():%H:%M:%S} (pid {os.getpid()})")
+        self.file.flush()
+        return self
+
+    def __exit__(self, *exc):
+        self.file.truncate(0)
+        fcntl.flock(self.file, fcntl.LOCK_UN)
+        self.file.close()
+
+
+def lock_holder() -> str | None:
+    try:
+        with LOCK.open("a+") as file:
+            try:
+                fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                file.seek(0)
+                return file.read().strip() or "?"
+            fcntl.flock(file, fcntl.LOCK_UN)
+    except OSError:
+        pass
+    return None
+
+
+# --- GitHub -------------------------------------------------------------
+
+def fetch(pr: int | None = None) -> None:
+    if not MIRROR.exists():
+        ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
+        git("init", "--quiet", "--bare", str(MIRROR))
+    refs = ["+refs/heads/main:refs/heads/main"]
+    if pr:
+        refs.append(f"+refs/pull/{pr}/head:refs/pull/{pr}/head")
+    git("fetch", "--quiet", REPO, *refs, cwd=MIRROR)
+
+
+def setup() -> None:
+    ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
+    KEY.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if not KEY.exists():
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C",
+                        f"beeplay-release@{os.uname().nodename}", "-f", str(KEY)], check=True)
+    # GitHub's host keys from its API, over TLS, not from a first connection.
+    with urllib.request.urlopen("https://api.github.com/meta", timeout=20) as response:
+        keys = json.load(response)["ssh_keys"]
+    KNOWN_HOSTS.write_text("".join(f"github.com {key}\n" for key in keys))
+    print(Path(f"{KEY}.pub").read_text().strip())
+
+
+def check_access() -> None:
+    print(git("ls-remote", REPO, "refs/heads/main").split()[0])
+
+
+# --- release and rollback -----------------------------------------------
+
+def export(commit: str, stamp: str) -> Path:
+    RELEASES.mkdir(parents=True, exist_ok=True)
+    target = RELEASES / f"{stamp}-{commit[:7]}"
+    target.mkdir(mode=0o755)
+    archive = subprocess.Popen(["git", "archive", commit], cwd=MIRROR, stdout=subprocess.PIPE)
+    subprocess.run(["tar", "-x", "-C", str(target)], stdin=archive.stdout, check=True)
+    if archive.wait() != 0:
+        raise SystemExit(f"git archive {commit} failed")
+    return target
+
+
+def prune(keep: Path) -> None:
+    releases = sorted(p for p in RELEASES.iterdir() if p.is_dir())
+    for old in releases[:-KEEP]:
+        if old != keep:
+            shutil.rmtree(old, ignore_errors=True)
+
+
+def notify(text: str) -> None:
+    if subprocess.run(["beeplay-notify", text]).returncode != 0:
+        say("WARNING: the Lark group did not get the message")
+
+
+def release(args) -> int:
+    with Lock():
+        fetch(args.pr if args.dry_run else None)
+        commit = git("rev-parse", "--verify", f"{args.sha}^{{commit}}", cwd=MIRROR)
+        on_main = is_ancestor(commit, "refs/heads/main")
+        live, how = live_commit()
+        keeps_live = live is not None and is_ancestor(live, commit)
+        say(f"live: {live[:7] if live else 'unknown'} ({how})")
+        if not args.dry_run:
+            if not on_main:
+                raise SystemExit(f"refused: {commit[:7]} is not on main. Merge it first.")
+            if live is None:
+                raise SystemExit(f"refused: cannot tell what is live ({how}).")
+            if not keeps_live:
+                raise SystemExit(f"refused: {commit[:7]} does not contain the live {live[:7]}; "
+                                 "releasing it would take back what players have.")
+        elif live is not None and not keeps_live:
+            say(f"note: {commit[:7]} does not contain the live {live[:7]}; a real release would refuse")
+        stamp = now().strftime("%Y%m%d-%H%M%S")
+        tree = export(commit, stamp)
+        released_at = now().isoformat(timespec="seconds")
+        (tree / "version.json").write_text(json.dumps(
+            {"commit": commit, "pr": args.pr, "released_at": released_at}) + "\n")
+        before = db_version()
+        say(f"releasing {commit[:7]}{f' (PR #{args.pr})' if args.pr else ''} from {tree}")
+        code = subprocess.run(["bash", str(tree / "deploy" / "release.sh"), *(["--dry-run"] if args.dry_run else [])],
+                              env={**os.environ, "BEEPLAY_RELEASE_STAMP": stamp}).returncode
+        record({"at": released_at, "action": "dry-run" if args.dry_run else "release", "commit": commit,
+                "pr": args.pr, "by": args.by, "stamp": stamp, "result": "ok" if code == 0 else "failed",
+                "db_before": before, "db_after": db_version(), "from": live})
+        if code == 0 and not args.dry_run and args.notes_b64:
+            notify(base64.b64decode(args.notes_b64).decode())
+        prune(tree)
+        return code
+
+
+def rollback(args) -> int:
+    with Lock():
+        if not PREV.is_dir():
+            raise SystemExit(f"nothing to go back to: there is no {PREV}")
+        live, previous = read_version(APP) or {}, read_version(PREV) or {}
+        releases = [e for e in history() if e.get("action") == "release" and e.get("result") == "ok"]
+        last = releases[-1] if releases else {}
+        restore_db = False
+        backup = BACKUPS / f"beeplay-{last.get('stamp')}.db"
+        if last.get("db_before") and db_version() != last["db_before"]:
+            if not backup.exists():
+                raise SystemExit(f"not rolled back: the database moved but {backup} is missing")
+            minutes = int((time.time() - backup.stat().st_mtime) // 60) + 1
+            say(f"The last release moved the database from {last['db_before']} to {db_version()}; "
+                f"the previous code refuses it. Going back restores the backup from "
+                f"{datetime.datetime.fromtimestamp(backup.stat().st_mtime):%H:%M}: "
+                f"about {minutes} min of likes, uploads and sign-ups are lost.")
+            try:
+                with open("/dev/tty") as tty:
+                    print('Type "restore" to go back with that database: ', end="", file=sys.stderr, flush=True)
+                    restore_db = tty.readline().strip() == "restore"
+            except OSError:
+                pass
+            if not restore_db:
+                raise SystemExit("not rolled back: nothing was changed")
+        say(f"== putting back {str(previous.get('commit', '?'))[:7]} "
+            f"(was {str(live.get('commit', '?'))[:7]}) ==")
+        subprocess.run(["systemctl", "stop", "beeplay"], check=True)
+        undone = Path(f"{APP}.rolled-back")
+        shutil.rmtree(undone, ignore_errors=True)
+        APP.rename(undone)
+        subprocess.run(["cp", "-a", str(PREV), str(APP)], check=True)
+        if restore_db:
+            with sqlite3.connect(backup) as source, sqlite3.connect(DB) as target:
+                source.backup(target)
+            owner = pwd.getpwnam("beeplay")
+            for path in DB.parent.glob(DB.name + "*"):
+                os.chown(path, owner.pw_uid, owner.pw_gid)
+        deploy = APP / "deploy"
+        shutil.copy(deploy / "beeplay.service", "/etc/systemd/system/beeplay.service")
+        for tool in ("beeplay-ops", "beeplay-check", "beeplay-notify"):
+            if (deploy / tool).exists():
+                subprocess.run(["install", "-m", "755", str(deploy / tool), f"/usr/local/bin/{tool}"], check=True)
+        subprocess.run(["install", "-m", "644", str(deploy / "beeplay.caddy"), "/etc/caddy/sites/beeplay.caddy"], check=True)
+        subprocess.run(["systemctl", "daemon-reload"], check=True)
+        subprocess.run(["systemctl", "start", "beeplay"], check=True)
+        subprocess.run(["bash", "-c", "set -a; . /etc/caddy/cloudflare.env; set +a; "
+                        "caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1 && systemctl reload caddy"])
+        checked = False
+        for _ in range(10):
+            time.sleep(2)
+            if subprocess.run(["beeplay-check"]).returncode == 0:
+                checked = True
+                break
+        record({"at": now().isoformat(timespec="seconds"), "action": "rollback", "by": args.by,
+                "from": live.get("commit"), "pr": live.get("pr"), "commit": previous.get("commit"),
+                "db_restored": restore_db, "result": "ok" if checked else "failed"})
+        pr = f"PR #{live['pr']} " if live.get("pr") else ""
+        notify(f"↩️ BeePlay 已回滚到上一版本，{pr}已撤下，不用再测它了。")
+        say("rolled back" if checked else "rolled back, but beeplay-check still fails: look now")
+        return 0 if checked else 1
+
+
+def status(args) -> int:
+    live, how = live_commit()
+    version = read_version(APP) or {}
+    releases = [e for e in history() if e.get("action") in ("release", "rollback")]
+    last = releases[-1] if releases else None
+    print(json.dumps({
+        "live": live, "live_known_by": how, "pr": version.get("pr"),
+        "released_at": version.get("released_at") or (last or {}).get("at"),
+        "previous": (read_version(PREV) or {}).get("commit"),
+        "lock": lock_holder(), "last": last, "database": db_version(),
+        "since_release": errors_since(version.get("released_at") or (last or {}).get("at")),
+        "deploy_key": KEY.exists(),
+    }))
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="beeplay-release", description=__doc__.split("\n\n")[0])
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("status").set_defaults(run=status)
+    releasing = commands.add_parser("release")
+    releasing.add_argument("sha")
+    releasing.add_argument("--pr", type=int)
+    releasing.add_argument("--by", default="?")
+    releasing.add_argument("--notes-b64")
+    releasing.add_argument("--dry-run", action="store_true")
+    releasing.set_defaults(run=release)
+    rolling = commands.add_parser("rollback")
+    rolling.add_argument("--by", default="?")
+    rolling.set_defaults(run=rollback)
+    commands.add_parser("setup").set_defaults(run=lambda args: setup() or 0)
+    commands.add_parser("check-access").set_defaults(run=lambda args: check_access() or 0)
+    args = parser.parse_args(argv)
+    if os.geteuid() != 0:
+        raise SystemExit("run as root")
+    return args.run(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

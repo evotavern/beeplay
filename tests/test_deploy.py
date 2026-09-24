@@ -40,10 +40,16 @@ class CaddyConfigTests(unittest.TestCase):
 
     def test_long_caching_is_only_for_successful_responses(self) -> None:
         # A 403 cached for a week kept phones broken after the 2026-09-24 fix.
-        blocks = self.config.split("header Cache-Control")[1:]
+        blocks = [b for b in self.config.split("header Cache-Control")[1:] if "max-age" in b.split("\n")[0]]
         self.assertEqual(len(blocks), 3)  # /assets/, /games/, /avatars/
         for block in blocks:
             self.assertIn("match status 2xx 304", block[: block.index("}")])
+
+    def test_what_is_live_is_served_uncached(self) -> None:
+        route = self.config[self.config.index("handle /version {"):]
+        route = route[: route.index("\n\t}")]
+        self.assertIn("rewrite * /version.json", route)
+        self.assertIn('header Cache-Control "no-store"', route)
 
 
 class DeploymentScriptTests(unittest.TestCase):
@@ -110,6 +116,15 @@ class DeploymentScriptTests(unittest.TestCase):
         verify = release[release.index('echo "== verify =="'):]
         self.assertIn("beeplay-check", verify)
         self.assertIn("beeplay-check.timer", release)
+
+    def test_releases_come_from_github_through_beeplay_release(self) -> None:
+        release = (ROOT / "deploy" / "release.sh").read_text()
+        # The backup is named with beeplay-release's stamp, for rollbacks.
+        self.assertIn("STAMP=${BEEPLAY_RELEASE_STAMP:-", release)
+        self.assertIn("install -m 755 \"$APP/deploy/beeplay-release\" /usr/local/bin/beeplay-release", release)
+        push = (ROOT / "deploy" / "push.sh").read_text()
+        self.assertIn('exec python3 "$(dirname "$0")/push.py"', push)
+        self.assertNotIn("rsync", push)  # no working tree is ever copied to the server
 
     def test_local_deployment_check_covers_scripts_tests_and_caddy(self) -> None:
         check = (ROOT / "deploy" / "test-config.sh").read_text()
