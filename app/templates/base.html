@@ -25,6 +25,11 @@
       --radius-md: 20px;
       --radius-sm: 14px;
       --font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      /* The screen's bottom inset (the home bar), and the bottom nav's height
+         and distance from the bottom edge: the feed tray keeps clear of it. */
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --nav-height: 56px;
+      --nav-bottom: max(7px, var(--safe-bottom));
     }
 
     * { box-sizing: border-box; }
@@ -106,10 +111,12 @@
       font-weight: 850;
       transition: background 160ms ease, color 160ms ease, transform 160ms ease;
     }
-    .desktop-nav button:hover {
-      transform: translateY(-1px);
-      color: var(--ink);
-      background: rgba(255, 255, 255, 0.58);
+    @media (hover: hover) and (pointer: fine) {
+      .desktop-nav button:hover {
+        transform: translateY(-1px);
+        color: var(--ink);
+        background: rgba(255, 255, 255, 0.58);
+      }
     }
     .desktop-nav button.active {
       color: var(--white);
@@ -130,9 +137,11 @@
       font-weight: 900;
       transition: transform 160ms ease, box-shadow 160ms ease;
     }
-    .desktop-create:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 8px 16px rgba(181, 214, 90, 0.28);
+    @media (hover: hover) and (pointer: fine) {
+      .desktop-create:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 8px 16px rgba(181, 214, 90, 0.28);
+      }
     }
     .icon-button,
     .avatar-button,
@@ -148,7 +157,7 @@
       transition: transform 160ms ease, background 160ms ease, box-shadow 160ms ease;
     }
     .icon-button { width: 46px; padding: 0; }
-    .icon-button:hover, .avatar-button:hover, .credit-pill:hover { transform: translateY(-2px); background: rgba(255,255,255,0.62); }
+    @media (hover: hover) and (pointer: fine) { .icon-button:hover, .avatar-button:hover, .credit-pill:hover { transform: translateY(-2px); background: rgba(255,255,255,0.62); } }
     .avatar-button { width: 46px; padding: 0; overflow: hidden; }
     .avatar-button img { width: 100%; height: 100%; object-fit: cover; }
     .credit-pill { gap: 8px; padding: 0 14px; font-weight: 800; }
@@ -252,7 +261,7 @@
     }
     .primary-button { background: var(--ink); color: var(--white); box-shadow: 0 14px 22px rgba(23,27,26,0.13); }
     .secondary-button { background: transparent; color: var(--ink); border-color: var(--line); }
-    .primary-button:hover, .secondary-button:hover { transform: translateY(-2px); }
+    @media (hover: hover) and (pointer: fine) { .primary-button:hover, .secondary-button:hover { transform: translateY(-2px); } }
     .primary-button .button-arrow { color: var(--lime); font-size: 18px; }
 
     .mascot-stage {
@@ -457,7 +466,7 @@
     .category-pill.active { background: var(--ink); color: var(--white); border-color: var(--ink); }
     .work-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
     .work-card { border-radius: var(--radius-lg); background: var(--cream); padding: 10px; box-shadow: 0 10px 30px rgba(48,62,18,0.09); transition: transform 160ms ease, box-shadow 160ms ease; }
-    .work-card:hover { transform: translateY(-5px); box-shadow: 0 16px 36px rgba(48,62,18,0.15); }
+    @media (hover: hover) and (pointer: fine) { .work-card:hover { transform: translateY(-5px); box-shadow: 0 16px 36px rgba(48,62,18,0.15); } }
     .work-art { aspect-ratio: 0.9; border-radius: 21px; overflow: hidden; position: relative; display: grid; place-items: center; }
     .work-art.art-one { background: #c7e596; }
     .work-art.art-two { background: #d5d2ff; }
@@ -485,7 +494,7 @@
     .tool-strip { display: flex; gap: 10px; overflow-x: auto; padding: 16px 0 6px; scrollbar-width: none; }
     .tool-strip::-webkit-scrollbar { display: none; }
     .tool-chip { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 8px; padding: 11px 14px; border-radius: 16px; background: var(--lime-light); color: var(--ink); font-weight: 800; border: 1px solid transparent; }
-    .tool-chip:hover { border-color: var(--lime-dark); }
+    @media (hover: hover) and (pointer: fine) { .tool-chip:hover { border-color: var(--lime-dark); } }
     .inspiration-list { display: grid; gap: 13px; }
     .inspiration-card { display: flex; align-items: center; gap: 13px; padding: 12px; background: var(--white); border-radius: 20px; border: 1px solid rgba(23,27,26,0.08); }
     .inspiration-art { width: 66px; aspect-ratio: 1; border-radius: 16px; display: grid; place-items: center; background: var(--lime-light); font-size: 28px; }
@@ -526,10 +535,12 @@
       box-shadow: 0 10px 24px rgba(48,62,18,0.08);
       transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
     }
-    .message-item:hover {
-      transform: translateY(-2px);
-      border-color: rgba(23,27,26,0.16);
-      box-shadow: 0 14px 30px rgba(48,62,18,0.12);
+    @media (hover: hover) and (pointer: fine) {
+      .message-item:hover {
+        transform: translateY(-2px);
+        border-color: rgba(23,27,26,0.16);
+        box-shadow: 0 14px 30px rgba(48,62,18,0.12);
+      }
     }
     .message-item:last-child { border-bottom: 1px solid rgba(23,27,26,0.08); }
     .message-item > span:last-child {
@@ -606,10 +617,10 @@
       transition: background 160ms ease, color 160ms ease;
     }
     .nav-item.active { background: rgba(255,255,255,0.12); color: var(--lime); }
-    .nav-item:hover { color: var(--white); }
+    @media (hover: hover) and (pointer: fine) { .nav-item:not(.active):hover { color: var(--white); } }
     .nav-item .dot { position: absolute; top: 7px; right: 11px; width: 8px; height: 8px; border-radius: 50%; background: var(--orange); border: 2px solid var(--ink); }
     .floating-create { width: 60px; height: 60px; border: 0; border-radius: 50%; background: var(--lime); color: var(--ink); display: grid; place-items: center; font-size: 31px; line-height: 1; box-shadow: 0 9px 22px rgba(181,214,90,0.3); transition: transform 160ms ease; }
-    .floating-create:hover { transform: rotate(8deg) scale(1.05); }
+    @media (hover: hover) and (pointer: fine) { .floating-create:hover { transform: rotate(8deg) scale(1.05); } }
     .bottom-spacer { height: 120px; }
 
     .modal-backdrop { position: fixed; inset: 0; z-index: 50; display: none; align-items: end; justify-content: center; background: rgba(23,27,26,0.52); padding: 20px; }
@@ -623,21 +634,21 @@
     .close-button { width: 40px; height: 40px; border: 0; background: var(--white); border-radius: 50%; font-size: 23px; line-height: 1; }
     .modal-body { display: grid; gap: 12px; margin-top: 20px; }
     .modal-choice { width: 100%; padding: 15px; border-radius: 20px; border: 1px solid var(--line); background: var(--white); display: flex; align-items: center; gap: 13px; text-align: left; transition: transform 160ms ease, border-color 160ms ease; }
-    .modal-choice:hover { transform: translateX(3px); border-color: var(--lime-dark); }
+    @media (hover: hover) and (pointer: fine) { .modal-choice:hover { transform: translateX(3px); border-color: var(--lime-dark); } }
     .choice-icon { width: 44px; height: 44px; border-radius: 15px; background: var(--lime-light); display: grid; place-items: center; font-size: 22px; }
     .modal-choice strong { display: block; font-size: 14px; }
     .modal-choice span { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
     .import-game-form { display: grid; gap: 14px; }
     .import-game-form[hidden], .create-choices[hidden] { display: none; }
     .import-dropzone { min-height: 156px; padding: 20px; border: 2px dashed rgba(151,189,56,0.52); border-radius: 22px; background: var(--mint); display: grid; place-items: center; align-content: center; gap: 6px; color: var(--ink); text-align: center; transition: background 160ms ease, border-color 160ms ease, transform 160ms ease; }
-    .import-dropzone:hover { border-color: var(--lime-dark); transform: translateY(-1px); }
+    @media (hover: hover) and (pointer: fine) { .import-dropzone:hover { border-color: var(--lime-dark); transform: translateY(-1px); } }
     .import-dropzone.dragging { border-color: var(--lime-dark); background: var(--lime-light); }
     .import-drop-icon { width: 42px; height: 42px; border-radius: 15px; display: grid; place-items: center; background: var(--ink); color: var(--lime); font-size: 21px; }
     .import-dropzone strong { font-size: 14px; }
     .import-dropzone small { color: var(--muted); font-size: 12px; }
     .import-sources { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
     .import-source { min-height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--white); color: var(--ink); font-size: 12px; font-weight: 850; }
-    .import-source:hover { border-color: var(--lime-dark); }
+    @media (hover: hover) and (pointer: fine) { .import-source:hover { border-color: var(--lime-dark); } }
     .import-title-label { display: grid; gap: 7px; color: var(--muted); font-size: 12px; font-weight: 800; }
     .import-title-label span { font-weight: 500; }
     .import-title { width: 100%; min-height: 44px; padding: 0 13px; border: 1px solid var(--line); border-radius: 14px; background: var(--white); color: var(--ink); }
@@ -1013,12 +1024,12 @@
       font-size: 19px;
       transition: transform 160ms ease, background 160ms ease;
     }
-    body.mobile-preview .game-action:hover,
     body.mobile-preview .game-action.active {
       background: var(--lime);
       color: var(--ink);
       transform: scale(1.06);
     }
+    @media (hover: hover) and (pointer: fine) { body.mobile-preview .game-action:hover { background: var(--lime); color: var(--ink); transform: scale(1.06); } }
     body.mobile-preview .game-action small {
       display: block;
       margin-top: 3px;
@@ -1099,7 +1110,7 @@
     #createModal .modal-choice {
       min-height: 82px; gap: 12px; padding: 12px; border-radius: 18px; color: var(--ink);
     }
-    #createModal .modal-choice:hover { transform: translateY(-1px); }
+    @media (hover: hover) and (pointer: fine) { #createModal .modal-choice:hover { transform: translateY(-1px); } }
     #createModal .choice-icon {
       display: grid; flex: 0 0 auto; width: 48px; height: 48px; border-radius: 16px; font-size: 21px;
     }
@@ -1133,8 +1144,7 @@
       overscroll-behavior: none; touch-action: none;
     }
     body.mobile-preview .game-card {
-      --tray-height: clamp(176px, 22dvh, 190px);
-      display: grid; grid-template-rows: minmax(0, 1fr) var(--tray-height);
+      display: grid; grid-template-rows: minmax(0, 1fr) auto;
       width: 100%; height: 100dvh; min-height: 0; margin: 0;
       overflow: hidden; border-radius: 0; background: var(--lime);
       scroll-snap-align: none;
@@ -1156,6 +1166,8 @@
     .game-window .game-frame {
       display: block; width: 100%; height: 100%; border: 0; background: #111;
     }
+    /* Mid trackpad flick: see the wheel handler in app.js. */
+    body.feed-wheeling .game-frame { pointer-events: none; }
     .game-expand, .game-collapse, .game-mute {
       position: absolute; z-index: 4; display: grid; place-items: center; padding: 0;
       border: 1px solid rgba(255,255,255,.18); color: #fff; background: rgba(9,11,11,.62);
@@ -1191,12 +1203,16 @@
     .game-loading small { font-weight: 850; }
     .game-loading[hidden] { display: none; }
     .game-frame.loaded + .game-loading { display: none; }
+    /* As tall as its content plus the bottom nav's footprint, so the nav can
+       never cover the action row, whatever the screen or its bottom inset. */
     .game-tray {
-      position: relative; z-index: 3; height: var(--tray-height); min-height: 0;
-      padding: 13px 14px calc(70px + env(safe-area-inset-bottom));
-      color: var(--white); background: var(--ink); touch-action: none;
-      user-select: none; cursor: grab;
+      position: relative; z-index: 3;
+      padding: 13px 14px calc(var(--nav-height) + var(--nav-bottom) + 8px);
+      color: var(--white); background: var(--ink); touch-action: none; cursor: grab;
+      /* A long press or slow drag stays a swipe: no selection or callout. */
+      -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
     }
+    .game-tray a, .game-tray img { -webkit-user-drag: none; }
     .tray-handle {
       position: absolute; top: 6px; left: 50%; width: 34px; height: 3px;
       border-radius: 999px; background: rgba(255,255,255,.32); transform: translateX(-50%);
@@ -1211,7 +1227,7 @@
     }
     .game-title-row p {
       display: -webkit-box; margin: 3px 0 0; overflow: hidden;
-      color: rgba(255,255,255,.62); font-size: 10px; line-height: 1.25;
+      min-height: 2.5em; color: rgba(255,255,255,.62); font-size: 10px; line-height: 1.25;
       -webkit-box-orient: vertical; -webkit-line-clamp: 2;
     }
     .follow-author {
@@ -1245,7 +1261,7 @@
     /* One bottom nav on every page: solid, so it reads the same over the dark
        feed tray and over the light pages, and laid out the same everywhere. */
     body.mobile-preview .bottom-nav {
-      width: min(402px, calc(100% - 20px)); bottom: max(7px, env(safe-area-inset-bottom));
+      width: min(402px, calc(100% - 20px)); height: var(--nav-height); bottom: var(--nav-bottom);
       padding: 5px; border: 1px solid rgba(255,255,255,.09); background: rgba(23,27,26,0.94);
       box-shadow: 0 12px 30px rgba(23,27,26,0.22); backdrop-filter: none;
     }
@@ -1282,10 +1298,9 @@
     .comment-submit { min-width: 62px; border: 0; border-radius: 999px; background: var(--ink); color: #fff; font-weight: 850; }
 
     @media (max-height: 700px) {
-      body.mobile-preview .game-card { --tray-height: 164px; }
       .game-tray { padding-top: 12px; }
       .game-title-row h2 { font-size: 18px; }
-      .game-title-row p { -webkit-line-clamp: 1; }
+      .game-title-row p { min-height: 1.25em; -webkit-line-clamp: 1; }
       .game-tray .game-author { margin-top: 3px; }
       .game-tray-actions { margin-top: 5px; }
     }

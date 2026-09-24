@@ -7,8 +7,10 @@
 .author-link img,
 .feature-author img { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; flex: none; }
 .feature-author img { width: 30px; height: 30px; }
-.author-link:hover,
-.feature-author:hover { text-decoration: underline; }
+@media (hover: hover) and (pointer: fine) {
+  .author-link:hover,
+  .feature-author:hover { text-decoration: underline; }
+}
 
 .account-box { margin-top: 16px; padding: 14px; background: var(--white); border-radius: 18px; text-align: left; font-size: 13px; line-height: 1.5; color: var(--ink-soft); }
 .account-box p { margin: 0 0 10px; }
