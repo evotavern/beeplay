@@ -173,8 +173,13 @@ def session_dirs() -> list[str]:
 
 def summarize(candidate: Candidate, diff: str) -> tuple[list[str], list[str]]:
     """A plain summary for the briefing and what to test, in Chinese, for the
-    Lark post. Written by Claude from the diff; falls back to the title."""
-    fallback = ([candidate.title], [f"打开 beeplay.top，看看「{candidate.title}」是否正常"])
+    Lark post. Written by Claude from the diff; falls back to the title and
+    says why."""
+
+    def fallback(why: str) -> tuple[list[str], list[str]]:
+        return ([f"{candidate.title}  (no summary: {why})"],
+                [f"打开 beeplay.top，看看「{candidate.title}」是否正常"])
+
     prompt = (f"Title: {candidate.title}\n\nDescription:\n{candidate.body[:4000]}\n\n"
               f"Files: {', '.join(candidate.files[:80])}\n\nDiff (may be cut):\n{diff[:60000]}")
     system = ("You describe a change to BeePlay, a mobile-first web feed of small games, for the person "
@@ -186,14 +191,19 @@ def summarize(candidate: Candidate, diff: str) -> tuple[list[str], list[str]]:
             ["claude", "-p", "--output-format", "json", "--max-turns", "1", "--tools", "",
              "--strict-mcp-config", "--setting-sources", "", "--no-session-persistence",
              "--model", SUMMARY_MODEL, "--system-prompt", system],
-            input=prompt, capture_output=True, text=True, timeout=120, cwd=tempfile.gettempdir())
+            input=prompt, capture_output=True, text=True, timeout=180, cwd=tempfile.gettempdir())
+    except OSError:
+        return fallback("claude is not installed here")
+    except subprocess.TimeoutExpired:
+        return fallback("claude took over 3 minutes")
+    try:
         text = json.loads(out.stdout)["result"]
         answer = json.loads(re.search(r"\{.*\}", text, re.S).group(0))
-        summary = [str(line) for line in answer.get("summary", [])][:2]
-        tests = [str(line) for line in answer.get("test", [])][:4]
-        return (summary or fallback[0], tests or fallback[1])
-    except (OSError, ValueError, KeyError, AttributeError, subprocess.TimeoutExpired):
-        return fallback
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return fallback(f"claude answered {(out.stderr or out.stdout).strip()[:80]!r}")
+    summary = [str(line) for line in answer.get("summary", [])][:2]
+    tests = [str(line) for line in answer.get("test", [])][:4]
+    return (summary, tests) if summary and tests else fallback("claude gave no test steps")
 
 
 # --- judgement ----------------------------------------------------------
@@ -302,6 +312,8 @@ def render(facts: Facts, stops: list[str], warnings: list[str]) -> str:
         live.append(f"PR #{s['pr']}")
     if s.get("released_at"):
         live.append("since " + s["released_at"][:16].replace("T", " "))
+    if s.get("live") and s.get("live_known_by") != "version.json":
+        live.append(str(s.get("live_known_by")))
     live.append(f"database {s.get('database', '?')}")
     lines.append("LIVE NOW  " + " · ".join(live))
     assets = sorted({os.path.basename(f) for f in c.files if f.startswith("assets/")})
@@ -312,8 +324,11 @@ def render(facts: Facts, stops: list[str], warnings: list[str]) -> str:
     for i, line in enumerate(facts.tests):
         lines.append(("TO TEST   " if i == 0 else "          ") + "• " + line)
     since = s.get("since_release") or {}
-    lines.append(f"PROD      since the last release: {since.get('play_ok', 0)} plays ok, "
-                 f"{since.get('client_error', 0)} page errors, {since.get('server_error', 0)} server errors")
+    if s.get("released_at"):
+        lines.append(f"PROD      since the last release: {since.get('play_ok', 0)} plays ok, "
+                     f"{since.get('client_error', 0)} page errors, {since.get('server_error', 0)} server errors")
+    else:
+        lines.append("PROD      no release on record yet: counts start with this one")
     lines.append("STOPS     " + ("none" if not stops else stops[0]))
     lines.extend("          " + stop for stop in stops[1:])
     lines.append("WARNINGS  " + ("none" if not warnings else "⚠ " + warnings[0]))
@@ -341,7 +356,8 @@ def ask(question: str) -> str:
             tty.flush()
             return tty.readline().strip()
     except OSError:
-        raise Refused("releasing needs someone at a terminal: run deploy/push.sh yourself")
+        raise Refused("the ship prompt needs a terminal: run this in the Terminal pane or your own "
+                      "terminal. Commands run from a chat or by an agent have none.")
 
 
 def gather(target: str) -> Facts:

@@ -138,6 +138,13 @@ class OutputTests(unittest.TestCase):
         self.assertIn("IN SHORT  Taps respond at once.", text)
         self.assertIn("TO TEST   • 点赞，看按钮立刻变红", text)
         self.assertIn("STOPS     none", text)
+        self.assertIn("PROD      since the last release: 22 plays ok, 0 page errors, 0 server errors", text)
+
+    def test_before_any_stamped_release_the_briefing_says_so(self):
+        status = dict(STATUS, released_at=None, live_known_by="matched by its files", pr=None)
+        text = push.render(facts(status=status), [], [])
+        self.assertIn(f"LIVE NOW  {LIVE[:7]} · matched by its files · database 0009", text)
+        self.assertIn("PROD      no release on record yet: counts start with this one", text)
 
     def test_the_lark_post_is_chinese_and_names_the_tester(self):
         post = push.lark_post(pr(), ["点赞，看按钮立刻变红", "滑到下一个游戏"],
@@ -158,7 +165,7 @@ class OutputTests(unittest.TestCase):
             summary, tests = push.summarize(pr(), "diff")
         finally:
             os.environ["PATH"] = path
-        self.assertEqual(summary, ["fix: taps respond"])
+        self.assertEqual(summary, ["fix: taps respond  (no summary: claude is not installed here)"])
         self.assertEqual(tests, ["打开 beeplay.top，看看「fix: taps respond」是否正常"])
 
     def test_answers_come_from_the_terminal_not_a_pipe(self):
