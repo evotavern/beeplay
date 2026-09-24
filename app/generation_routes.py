@@ -58,7 +58,7 @@ def owned(session, job_id, user):
 def job_payload(job):
     return dict(id=job.id, prompt=job.prompt, status=job.status, active=job.status in ACTIVE,
                 details=json.loads(job.details), error=job.error, timings=json.loads(job.timings),
-                elapsed_ms=generation.elapsed(job), work_id=job.work_id,
+                elapsed_ms=generation.elapsed(job), work_id=job.work_id, controls=job.controls,
                 preview_url=f"/api/generations/{job.id}/preview",
                 playtested=job.playtest_at is not None)
 
@@ -66,6 +66,7 @@ def job_payload(job):
 class Start(BaseModel):
     prompt: str = Field(min_length=1, max_length=4000)
     request_id: uuid.UUID
+    controls: Literal["touch", "head"] = "touch"
 
 
 class Details(BaseModel):
@@ -101,7 +102,7 @@ def start_generation(body: Start, user=Depends(new_creator), session: Session = 
         if session.scalar(select(Generation.id).where(Generation.user_id == user.id, Generation.status.in_(ACTIVE))):
             raise HTTPException(409, "你已经有一个游戏正在生成")
         job = Generation(id=str(body.request_id), user_id=user.id,
-            prompt=body.prompt.strip(), model=config.EVOMAP_MODEL)
+            prompt=body.prompt.strip(), model=config.EVOMAP_MODEL, controls=body.controls)
         session.add(job)
         session.flush()
         generation.emit(session, job, "submitted", 0)

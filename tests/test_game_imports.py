@@ -5,8 +5,11 @@ import zipfile
 from pathlib import Path
 
 from app.game_imports import (
+    HEAD_API,
+    HEAD_MARKER,
     REPORTER_MARKER,
     GameImportError,
+    inject_head_api,
     inject_reporter,
     install_folder,
     install_zip,
@@ -65,4 +68,23 @@ class GameImportTests(unittest.TestCase):
         self.assertEqual(new.count(REPORTER_MARKER), 1)
         self.assertIn(b"<title>t</title>", new)
         self.assertEqual(inject_reporter(new), new)
+
+    def test_head_api_follows_the_reporter_and_survives_a_reporter_refresh(self) -> None:
+        game = inject_head_api(b"<html><head><script>game()</script></head></html>")
+        self.assertLess(game.index(REPORTER_MARKER), game.index(HEAD_API))
+        self.assertLess(game.index(HEAD_API), game.index(b"game()"))
+        self.assertEqual(inject_head_api(game), game)
+        older = game.replace(game[game.index(REPORTER_MARKER):game.index(HEAD_API)],
+                             REPORTER_MARKER + b"<script>oldReporter()</script>")
+        refreshed = inject_reporter(older)
+        self.assertTrue(reporter_is_current(refreshed))
+        self.assertEqual(refreshed.count(HEAD_API), 1)
+
+    def test_an_older_head_api_counts_as_out_of_date_and_is_swapped(self) -> None:
+        game = inject_head_api(b"<html><head><script>game()</script></head></html>")
+        older = game.replace(HEAD_API, HEAD_MARKER + b"<script>oldHead()</script>")
+        self.assertFalse(reporter_is_current(older))
+        refreshed = inject_reporter(older)
+        self.assertEqual(refreshed, game)
+        self.assertNotIn(b"oldHead", refreshed)
 

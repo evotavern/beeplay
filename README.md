@@ -77,6 +77,21 @@ tools/export-icons.cjs     # 图标导出脚本
 正在播放的音视频和 Web Audio，回来时只恢复它暂停过的内容，并派发 `beeplay:lifecycle`
 事件供游戏自行处理。
 
+### 用头玩（摄像头）
+
+创作时勾选「📷 用头玩」，生成请求改用 `app/generation.py` 里的 `HEAD_SYSTEM_PROMPT`，游戏里在
+上报脚本之后注入 `assets/js/head-api.js`，提供 `beeplay.head`（`x`、`y`、`tilt`，以及 `open`
+张嘴、`lost` / `found` 脸离开或回到画面）。没有摄像头时，拖动就是移动、点一下就是张嘴，所以每个
+用头玩的游戏也能用手指玩。
+
+摄像头只在 Beeplay 页面里打开（`assets/js/head-camera.js`），游戏本身拿不到画面，只收到数字；
+游戏的 sandbox 和 CSP 不变。人脸识别用 `assets/vendor/mediapipe/` 里的 MediaPipe Face
+Landmarker，第一次点按钮时才下载（约 15 MB，压缩后约 7 MB）。镜像画面放在游戏后面，
+游戏背景在摄像头打开时变透明。离开用头玩的游戏、切到后台或关掉试玩时摄像头就关掉；玩家打开过
+一次，之后再遇到用头玩的游戏会自动再打开，直到他点「关闭摄像头」。
+
+`beeplay-ops refresh-reporter` 也会把旧游戏里的 `head-api.js` 换成当前版本。
+
 ## 社交数据
 
 - 点赞与收藏会自动创建账号；两者都可撤销，并按「账号 + 游戏」唯一保存。

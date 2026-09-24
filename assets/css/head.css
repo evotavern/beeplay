@@ -1,0 +1,41 @@
+/* Camera head control: the mirrored camera behind a head game, and its
+   button. Behaviour in assets/js/head-camera.js. */
+/* Only while the camera is on (or starting): otherwise this positioned layer
+   would paint over the game frame. */
+.head-mirror { display: none; }
+.head-live > .head-mirror {
+  display: block; position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none;
+  background: #111;
+}
+.head-mirror video, .head-mirror canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1);
+}
+.head-live > iframe { position: relative; z-index: 1; background: transparent !important; }
+.head-note {
+  position: absolute; z-index: 2; left: 50%; top: 42%; width: max-content; max-width: 84%; margin: 0;
+  padding: 10px 14px; border-radius: 14px; transform: translateX(-50%); pointer-events: none;
+  color: #fff; background: rgba(9, 11, 11, .72); font-size: 15px; font-weight: 800; line-height: 1.4;
+  text-align: center;
+}
+.head-note[hidden] { display: none; }
+
+.game-head {
+  position: absolute; z-index: 4; top: 8px; left: 8px; padding: 7px 12px; border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, .22); color: #fff; background: rgba(9, 11, 11, .66);
+  font: inherit; font-size: 13px; font-weight: 850; white-space: nowrap;
+}
+.game-head.head-on { background: rgba(9, 11, 11, .82); }
+.game-head[hidden] { display: none; }
+.game-card.expanded .game-head { top: calc(4px + env(safe-area-inset-top)); }
+
+/* The playtest's button, in its top bar. */
+.generation-playtest-bar .generation-head { background: var(--white); color: var(--ink); font-weight: 800; }
+.generation-playtest-bar .generation-head[hidden] { display: none; }
+
+/* The create view's option. */
+.head-option {
+  display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 14px; font-weight: 800;
+  cursor: pointer;
+}
+.head-option input { width: 18px; height: 18px; accent-color: var(--ink); }
+.head-option small { color: var(--muted); font-weight: 600; }

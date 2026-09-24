@@ -282,6 +282,34 @@ class GenerationTests(test_http.HttpTestCase):
         self.client.post(f"/api/generations/{id}/events", json={"kind": "playtest_loaded"})
         self.assertEqual(self.client.post(f"/api/generations/{id}/publish", json={"title": "Draft"}).status_code, 422)
 
+    def test_head_game_gets_the_head_prompt_and_the_head_api_before_its_code(self):
+        response = self.submit(controls="head")
+        self.assertEqual(response.status_code, 202, response.text)
+        id = response.json()["id"]
+        self.assertEqual(response.json()["controls"], "head")
+        with patch.object(generation, "request_game", return_value=SUCCESS) as request:
+            with db.SessionLocal() as session:
+                session.get(Generation, id).status = "generating"
+                session.commit()
+            generation.run_job(id)
+        self.assertEqual(request.call_args.args[3], "head")
+        html = self.client.get(f"/api/generations/{id}/preview").text
+        self.assertLess(html.index("beeplay-reporter"), html.index("beeplay-head-api"))
+        self.assertLess(html.index("beeplay-head-api"), html.index("let score"))
+
+    def test_touch_is_the_default_and_gets_no_head_api(self):
+        id = self.ready_job()
+        self.assertEqual(self.client.get(f"/api/generations/{id}").json()["controls"], "touch")
+        self.assertNotIn("beeplay-head-api", self.client.get(f"/api/generations/{id}/preview").text)
+        self.assertEqual(self.submit(controls="feet").status_code, 422)
+
+    def test_head_prompt_replaces_the_touch_controls_and_keeps_the_rest(self):
+        self.assertIn(generation.TOUCH_CONTROLS, generation.SYSTEM_PROMPT)
+        self.assertNotIn(generation.TOUCH_CONTROLS, generation.HEAD_SYSTEM_PROMPT)
+        self.assertIn("portrait phone viewport only", generation.HEAD_SYSTEM_PROMPT)
+        self.assertIn("beeplay.head", generation.HEAD_SYSTEM_PROMPT)
+        self.assertIs(generation.system_prompt("touch"), generation.SYSTEM_PROMPT)
+
     def test_document_policy_precedes_all_model_code(self):
         document = generation.normalize_html(HTML.replace("<html>", "<script>bad()</script><html>"))
         self.assertLess(document.index("Content-Security-Policy"), document.index("bad()"))

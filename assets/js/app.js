@@ -682,6 +682,26 @@
       }
     });
     activeInlineCard = card;
+    syncHead();
+  }
+
+  // Games generated for head control say so ({beeplay: "head"}, from
+  // head-api.js): their card offers the camera, and the camera follows the
+  // active card while it is a head game (assets/js/head-camera.js).
+  function markHeadGame(play) {
+    if (play.head) return;
+    play.head = true;
+    var button = play.card.querySelector("[data-head-toggle]");
+    if (button) button.hidden = false;
+    if (play.card === activeInlineCard) syncHead();
+  }
+
+  function syncHead() {
+    if (!window.BeeHead) return;
+    var frame = activeInlineCard && activeInlineCard.querySelector(".game-frame");
+    var play = frame && inlinePlays.get(frame);
+    if (play && play.head) window.BeeHead.attach(play.card.querySelector(".game-stage"), frame, "gameplay");
+    else window.BeeHead.detach();
   }
 
   function expandGame(card) {
@@ -768,6 +788,8 @@
       reportHealth(matched, "loaded");
     } else if (data.beeplay === "error") {
       reportHealth(matched, "error", data.detail);
+    } else if (data.beeplay === "head") {
+      markHeadGame(matched);
     }
   });
 

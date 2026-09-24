@@ -19,7 +19,7 @@ from email.utils import parsedate_to_datetime
 from sqlalchemy import select, text
 
 from app import config, db, events
-from app.game_imports import inject_reporter
+from app.game_imports import inject_head_api, inject_reporter
 from app.models import Generation, GenerationAttempt, GenerationEvent, GenerationKey, utcnow
 
 # Job lifecycle. The error codes a failed job carries are mirrored as
@@ -48,6 +48,27 @@ Never make a landscape/horizontal game, ask the player to rotate, or rely on lan
 Fit the viewport without clipping, prevent accidental scrolling while playing, make controls large.
 Keep code compact: aim for under 4000 output tokens. Implement one mechanic well.
 The surrounding app handles title, cover and publishing. Do not ask questions.
+"""
+TOUCH_CONTROLS = "touch/pointer controls and keyboard where useful"
+# The same game brief, played with the head through the front camera. The app
+# owns the camera and injects window.beeplay.head (assets/js/head-api.js).
+HEAD_SYSTEM_PROMPT = SYSTEM_PROMPT.replace(TOUCH_CONTROLS, "the head controls described below") + """
+HEAD CONTROLS. The player controls this game by moving their head in front of the front camera.
+Before your code runs, the page defines window.beeplay.head:
+- beeplay.head.x, beeplay.head.y: head position from 0 to 1 across and down the screen,
+  0.5 is the centre, already smoothed. Read them every frame to move the player.
+- beeplay.head.tilt: head tilt from -1 (left) to 1 (right). Optional: the game must be
+  fully playable with x (or y) plus the open action alone.
+- beeplay.head.on("open", fn): the player opened their mouth. This is the one action button.
+- beeplay.head.on("lost", fn) / beeplay.head.on("found", fn): the face left or came back into
+  view. Pause or slow down while lost. beeplay.head.found tells the current state.
+Without a camera the page maps dragging to x/y and a tap to "open" by itself. Do not write
+your own touch, mouse or keyboard controls for play, and never access the camera yourself.
+The player's mirrored camera image is shown behind the game: keep canvases transparent
+(clearRect, never fill the whole canvas with a background colour) and give sprites bright
+colours with dark outlines so they read over any picture. Keep the top-left corner free.
+Head movement is slow and imprecise: large targets, forgiving timing, no fine aiming.
+Show a one-line instruction such as "移动头部躲开，张嘴跳跃" in the player's language.
 """
 
 
@@ -123,11 +144,15 @@ def cooldown(headers):
     return min(86400, max(1, seconds))
 
 
-def request_game(key, model, prompt):
+def system_prompt(controls):
+    return HEAD_SYSTEM_PROMPT if controls == "head" else SYSTEM_PROMPT
+
+
+def request_game(key, model, prompt, controls="touch"):
     request = urllib.request.Request(
         config.EVOMAP_BASE_URL + "/chat/completions",
         data=json.dumps({"model": model, "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}],
+            {"role": "system", "content": system_prompt(controls)}, {"role": "user", "content": prompt}],
             "max_tokens": config.GENERATION_MAX_TOKENS, "stream": False}).encode(),
         headers={"Content-Type": "application/json", "Authorization": "Bearer " + key})
     opener = urllib.request.build_opener(NoRedirect)
@@ -161,7 +186,7 @@ def safe_limits(headers):
     return {k: str(headers[k])[:128] for k in names if k in headers}
 
 
-def normalize_html(content):
+def normalize_html(content, controls="touch"):
     if not isinstance(content, str):
         raise ValueError("missing_html")
     content = content.strip()
@@ -178,7 +203,8 @@ def normalize_html(content):
     # applies when this document is opened directly, outside the app iframe.
     policy = '<meta http-equiv="Content-Security-Policy" content="' + html_module.escape(CSP, quote=True) + '">'
     # Prefix policy so even malformed model markup before <head> is covered.
-    return policy + inject_reporter(content.encode()).decode()
+    inject = inject_head_api if controls == "head" else inject_reporter
+    return policy + inject(content.encode()).decode()
 
 
 def reject_landscape_layout(content):
@@ -258,7 +284,7 @@ def pool_exhausted_error(reasons):
 def run_job(job_id):
     with db.SessionLocal() as session:
         job = session.get(Generation, job_id)
-        model, prompt = job.model, job.prompt
+        model, prompt, controls = job.model, job.prompt, job.controls
     excluded = set()
     reasons = set()
     while True:
@@ -272,7 +298,7 @@ def run_job(job_id):
         status, headers, data = None, {}, {}
         error = None
         try:
-            status, headers, data = request_game(raw_key, model, prompt)
+            status, headers, data = request_game(raw_key, model, prompt, controls)
         except (OSError, http.client.HTTPException, ValueError):
             # Network failure, timeout or oversized body: the completion state
             # is unknown, so no automatic retry/duplicate spending. Anything
@@ -313,7 +339,7 @@ def run_job(job_id):
         choice = data["choices"][0]
         if choice.get("finish_reason") != "stop":
             raise ValueError("incomplete_output")
-        document = normalize_html(choice["message"]["content"])
+        document = normalize_html(choice["message"]["content"], controls)
     except ValueError as error:
         fail(job_id, "landscape_game" if str(error) == "landscape_layout" else "invalid_game")
         return
