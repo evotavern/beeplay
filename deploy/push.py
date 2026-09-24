@@ -197,10 +197,15 @@ def summarize(candidate: Candidate, diff: str) -> tuple[list[str], list[str]]:
     except subprocess.TimeoutExpired:
         return fallback("claude took over 3 minutes")
     try:
-        text = json.loads(out.stdout)["result"]
-        answer = json.loads(re.search(r"\{.*\}", text, re.S).group(0))
+        envelope = json.loads(out.stdout)
+    except ValueError:
+        return fallback(f"claude answered {(out.stderr or out.stdout).strip()[:100]!r}")
+    if envelope.get("is_error"):  # e.g. the claude CLI is not logged in here: run `claude` once
+        return fallback(f"claude: {str(envelope.get('result') or envelope.get('subtype'))[:100]}")
+    try:
+        answer = json.loads(re.search(r"\{.*\}", envelope["result"], re.S).group(0))
     except (ValueError, KeyError, TypeError, AttributeError):
-        return fallback(f"claude answered {(out.stderr or out.stdout).strip()[:80]!r}")
+        return fallback("claude's answer was not the JSON asked for")
     summary = [str(line) for line in answer.get("summary", [])][:2]
     tests = [str(line) for line in answer.get("test", [])][:4]
     return (summary, tests) if summary and tests else fallback("claude gave no test steps")
