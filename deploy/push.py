@@ -191,7 +191,11 @@ def summarize(candidate: Candidate, diff: str) -> tuple[list[str], list[str]]:
             ["claude", "-p", "--output-format", "json", "--max-turns", "1", "--tools", "",
              "--strict-mcp-config", "--setting-sources", "", "--no-session-persistence",
              "--model", SUMMARY_MODEL, "--system-prompt", system],
-            input=prompt, capture_output=True, text=True, timeout=180, cwd=tempfile.gettempdir())
+            input=prompt, capture_output=True, text=True, timeout=180, cwd=tempfile.gettempdir(),
+            # A terminal inside the Claude desktop app inherits the app's
+            # session credentials, which the CLI may not use (403): let it use
+            # its own login.
+            env={k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")})
     except OSError:
         return fallback("claude is not installed here")
     except subprocess.TimeoutExpired:
