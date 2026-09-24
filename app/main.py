@@ -153,6 +153,13 @@ class AvatarFiles(StaticFiles):
 # Development convenience again: Caddy serves /avatars/* from disk.
 app.mount("/avatars", AvatarFiles(directory=config.AVATARS_DIR), name="avatars")
 
+# Hashed into every asset URL along with the file. Change it to give every
+# asset a new URL at once, when browsers may be caching a bad answer for a file
+# that did not change: on 2026-09-24 Caddy answered /assets/ with 403 for a
+# quarter of an hour, with the week-long Cache-Control of a good answer.
+ASSET_EPOCH = b"2026-09-24"
+
+
 @lru_cache
 def asset(path: str) -> str:
     """URL for a file under assets/, versioned by its contents.
@@ -161,7 +168,8 @@ def asset(path: str) -> str:
     returning visitors on the previous release's JavaScript after a deploy.
     Hashed once per process, i.e. once per release.
     """
-    digest = hashlib.sha256((BASE_DIR / "assets" / path).read_bytes()).hexdigest()[:12]
+    contents = (BASE_DIR / "assets" / path).read_bytes()
+    digest = hashlib.sha256(ASSET_EPOCH + contents).hexdigest()[:12]
     return f"/assets/{path}?v={digest}"
 
 
