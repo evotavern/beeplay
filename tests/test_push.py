@@ -3,6 +3,9 @@
 import datetime
 import importlib.util
 import os
+import pty
+import select
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -169,8 +172,48 @@ class OutputTests(unittest.TestCase):
         self.assertEqual(tests, ["打开 beeplay.top，看看「fix: taps respond」是否正常"])
 
     def test_answers_come_from_the_terminal_not_a_pipe(self):
-        source = (ROOT / "deploy" / "push.py").read_text()
-        self.assertIn('open("/dev/tty", "r+")', source)
+        for answer, piped in [("ship", "cancel"), ("cancel", "ship")]:
+            with self.subTest(answer=answer):
+                master, slave = pty.openpty()
+                code = (
+                    "import os, runpy, sys\n"
+                    # Opening a terminal as a session leader acquires it.
+                    "terminal = os.open(sys.argv[1], os.O_RDWR)\n"
+                    "push = runpy.run_path(sys.argv[2])\n"
+                    "print(repr(push['ask']('确认 ship: ')))\n"
+                )
+                try:
+                    with subprocess.Popen(
+                        [sys.executable, "-c", code, os.ttyname(slave), str(ROOT / "deploy" / "push.py")],
+                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                        text=True, start_new_session=True,
+                    ) as child:
+                        try:
+                            child.stdin.write(piped + "\n")
+                            child.stdin.flush()
+                            self.assertTrue(select.select([master], [], [], 5)[0], "no terminal prompt")
+                            self.assertIn("确认 ship: ", os.read(master, 4096).decode())
+                            os.write(master, (answer + "\n").encode())
+                            out, err = child.communicate(timeout=5)
+                            self.assertEqual(child.returncode, 0, err)
+                            self.assertEqual(out.strip(), repr(answer))
+                        finally:
+                            if child.poll() is None:
+                                child.kill()
+                                child.communicate()
+                finally:
+                    os.close(master)
+                    os.close(slave)
+
+    def test_without_a_terminal_piped_ship_is_refused(self):
+        child = subprocess.run(
+            [sys.executable, "-c",
+             "import runpy, sys; runpy.run_path(sys.argv[1])['ask']('ship: ')",
+             str(ROOT / "deploy" / "push.py")],
+            input="ship\n", capture_output=True, text=True, start_new_session=True, timeout=5,
+        )
+        self.assertNotEqual(child.returncode, 0)
+        self.assertIn("the ship prompt needs a terminal", child.stderr)
 
 
 if __name__ == "__main__":

@@ -356,10 +356,11 @@ def lark_post(candidate: Candidate, tests: list[str], when: datetime.datetime) -
 def ask(question: str) -> str:
     """Read an answer from the terminal itself, never from a pipe."""
     try:
-        with open("/dev/tty", "r+") as tty:
-            tty.write(question)
-            tty.flush()
-            return tty.readline().strip()
+        # Buffered r+ streams require seeking, which terminals do not support.
+        with open("/dev/tty", "r") as reader, open("/dev/tty", "w") as writer:
+            writer.write(question)
+            writer.flush()
+            return reader.readline().strip()
     except OSError:
         raise Refused("the ship prompt needs a terminal: run this in the Terminal pane or your own "
                       "terminal. Commands run from a chat or by an agent have none.")
