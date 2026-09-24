@@ -405,12 +405,6 @@
     htmx.ajax("GET", "/create", { target: "#viewport", swap: "innerHTML" }).then(function () {
       var ideaInput = document.getElementById("ideaInput");
       if (!ideaInput) return;
-      if (choice.dataset.modalChoice === "habit") {
-        ideaInput.value = "帮我做一个每天都想打开的习惯计划";
-      }
-      if (choice.dataset.modalChoice === "remix") {
-        ideaInput.value = "我想 Remix 一个轻松、有一点惊喜的互动作品";
-      }
       setTimeout(function () { ideaInput.focus(); }, 250);
     });
   });

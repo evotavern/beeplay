@@ -1084,6 +1084,27 @@
       padding: 20px;
       border-radius: 28px;
     }
+    /* Double's create sheet: a compact bottom sheet of entry cards. */
+    #createModal { align-items: end; padding: 12px; }
+    #createModal .modal {
+      width: min(390px, calc(100vw - 24px)); max-height: calc(100dvh - 92px);
+      padding: 20px 14px 16px; border-radius: 28px;
+    }
+    #createModal .modal-head { gap: 12px; }
+    #createModal .modal-head h2 { font-size: 30px; line-height: 1.1; }
+    #createModal .modal-head p { margin-top: 6px; font-size: 12px; }
+    #createModal .close-button { flex: 0 0 auto; width: 34px; height: 34px; font-size: 19px; }
+    #createModal .modal-body { margin-top: 14px; }
+    #createModal .create-choices { display: grid; gap: 8px; }
+    #createModal .modal-choice {
+      min-height: 82px; gap: 12px; padding: 12px; border-radius: 18px; color: var(--ink);
+    }
+    #createModal .modal-choice:hover { transform: translateY(-1px); }
+    #createModal .choice-icon {
+      display: grid; flex: 0 0 auto; width: 48px; height: 48px; border-radius: 16px; font-size: 21px;
+    }
+    #createModal .modal-choice strong { font-size: 15px; }
+    #createModal .modal-choice > span:last-child > span { margin-top: 3px; font-size: 11px; line-height: 1.35; }
     @media (min-width: 431px) {
       body.mobile-preview .app-shell {
         min-height: calc(100dvh - 36px);
@@ -1276,6 +1297,13 @@
     body.mobile-preview #discoverView .work-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
     body.mobile-preview .game-tray .game-author::before { display: none; }
     body.mobile-preview #profileView { padding: 18px 16px 0; }
+    /* The shell has no padding in this layout (the feed is edge to edge), so
+       every other page brings its own; the top bar is hidden too. */
+    body.mobile-preview #messagesView,
+    body.mobile-preview #userView,
+    body.mobile-preview #loginView,
+    body.mobile-preview #resetView,
+    body.mobile-preview #createView { padding: calc(18px + env(safe-area-inset-top)) 16px 0; }
     body.mobile-preview #profileView .profile-layout { display: block; }
     body.mobile-preview #profileView .profile-card {
       display: grid; grid-template-columns: 86px minmax(0,1fr); gap: 12px 16px;
@@ -1288,10 +1316,11 @@
     body.mobile-preview #profileView .profile-bio { margin: 8px 0 0; font-size: 12px; }
     body.mobile-preview #profileView .profile-actions { grid-column: 1 / -1; display: flex; gap: 8px; }
     body.mobile-preview #profileView .profile-actions > * { flex: 1; }
-    body.mobile-preview #profileView .profile-stats { grid-column: 1 / -1; }
+    body.mobile-preview #profileView .profile-stats,
+    body.mobile-preview #profileView .account-box { grid-column: 1 / -1; }
     body.mobile-preview #profileView .profile-content { margin-top: 16px; }
     body.mobile-preview #profileView .tabs {
-      display: grid; grid-template-columns: repeat(4,1fr); gap: 5px; padding: 5px;
+      display: grid; grid-template-columns: repeat(4,1fr); gap: 5px; padding: 5px; width: 100%;
       border-radius: 20px; background: rgba(255,255,255,.36);
     }
     body.mobile-preview #profileView .tab {
@@ -1370,10 +1399,8 @@
       <div class="modal-head"><div><h2 id="createModalTitle">你想玩什么？</h2><p id="createModalDescription">选择一个入口，马上开始你的 Bee。</p></div><button class="close-button" id="closeModal" aria-label="关闭">×</button></div>
       <div class="modal-body">
         <div class="create-choices" id="createChoices">
-          <button class="modal-choice" data-modal-choice="idea"><span class="choice-icon">✦</span><span><strong>从一个想法开始</strong><span>输入一句话，让 Beeplay 帮你建立第一个版本。</span></span></button>
-          <button class="modal-choice" data-modal-choice="habit"><span class="choice-icon">☀</span><span><strong>做一个习惯计划</strong><span>把想坚持的事变成每天都想打开的小任务。</span></span></button>
-          <button class="modal-choice" data-modal-choice="remix"><span class="choice-icon">↗</span><span><strong>Remix 一个作品</strong><span>从社区里的灵感出发，做成属于你的版本。</span></span></button>
-          <button class="modal-choice" data-modal-choice="import"><span class="choice-icon">▣</span><span><strong>导入一个完成的小游戏</strong><span>带入已有的 HTML 游戏，加入首页游戏流。</span></span></button>
+          <button class="modal-choice" data-modal-choice="idea"><span class="choice-icon" aria-hidden="true">✦</span><span><strong>从一个想法开始</strong><span>输入一句话，让 Beeplay 帮你建立第一个版本</span></span></button>
+          <button class="modal-choice" data-modal-choice="import"><span class="choice-icon" aria-hidden="true">▣</span><span><strong>导入一个完成的小游戏</strong><span>带入已有的 HTML 游戏，加入首页游戏流</span></span></button>
         </div>
         <form class="import-game-form" id="importGameForm" hidden>
           <input class="import-file-input" id="importGameZip" type="file" accept=".zip,application/zip" />
