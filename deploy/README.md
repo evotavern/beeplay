@@ -51,7 +51,7 @@ migrates on startup, so a plain restart is always safe.
 ## First install on a new server
 
 ```bash
-sudo apt-get update && sudo apt-get install -y curl sqlite3 rsync
+sudo apt-get update && sudo apt-get install -y curl sqlite3 rsync nodejs
 curl -LsSf https://astral.sh/uv/install.sh | sudo env UV_INSTALL_DIR=/usr/local/bin sh
 sudo useradd --system --home /srv/beeplay --shell /usr/sbin/nologin beeplay
 sudo mkdir -p /srv/beeplay && sudo chown beeplay:beeplay /srv/beeplay
@@ -157,3 +157,14 @@ beeplay-ops avatar-remove honey_lab   # back to the default drawing
 Check it is really them before handing over the link: opening it sets a new
 password and signs every device out. An account without a password has
 nothing to reset; it exists only in the browser that made it.
+
+## Generated game validation
+
+Node.js is required on the app host for JavaScript syntax validation (code is
+compiled, never executed). Releases check for it before changing the running app.
+Prompt version 2 assigns a stable, roughly 50/50 2D/3D rendering preference per
+job; explicit user preferences take priority. 3D uses projected geometry on
+Canvas 2D within the existing offline sandbox. Invalid scripts fail generation;
+preview errors/timeouts invalidate the publish gate until a fresh successful preview.
+Syntax validation does not prove runtime or gameplay correctness: creators must
+still test controls, scoring and restart on their target devices.

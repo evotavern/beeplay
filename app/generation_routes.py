@@ -157,7 +157,14 @@ def record_event(job_id: str, body: Signal, user=Depends(creator), session: Sess
         count = session.scalar(select(func.count()).select_from(GenerationEvent).where(GenerationEvent.generation_id == job.id))
         if count >= MAX_EVENTS_PER_JOB:
             raise HTTPException(429, "Too many events")
-        if body.kind == "playtest_loaded" and job.playtest_at is None:
+        if body.kind == "playtest_opened":
+            job.playtest_at = None
+            generation.update_timings(job, playtest_failed=False)
+        elif body.kind in ("playtest_error", "playtest_timeout"):
+            job.playtest_at = None
+            generation.update_timings(job, playtest_failed=True)
+        if (body.kind == "playtest_loaded" and job.playtest_at is None
+                and not json.loads(job.timings).get("playtest_failed")):
             job.playtest_at = utcnow()
         generation.emit(session, job, body.kind, body.elapsed_ms)
         if body.kind == "playtest_opened" and "to_playtest_ms" not in json.loads(job.timings):

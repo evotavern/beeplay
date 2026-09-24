@@ -8,6 +8,7 @@ import html as html_module
 import http.client
 import json
 import re
+import subprocess
 import threading
 import time
 import traceback
@@ -15,6 +16,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
+from html.parser import HTMLParser
 
 from sqlalchemy import select, text
 
@@ -39,12 +41,21 @@ CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline
        "base-uri 'none'; form-action 'none'; frame-src 'none'; object-src 'none'")
 SYSTEM_PROMPT = """Create one complete, small, delightful mobile browser game from the user's idea.
 Return ONLY a complete HTML document, starting with <!doctype html>, with a head and body.
-Use inline CSS and vanilla JavaScript, canvas or DOM. No markdown, explanation, dependencies,
+Use inline CSS and classic (non-module) vanilla JavaScript, canvas or DOM. No markdown, explanation, dependencies,
 external assets, network calls, imports, storage, iframes, forms, or navigation.
 Use procedural shapes/emoji, responsive layout, touch/pointer controls and keyboard where useful.
 Include brief instructions, an immediately playable core loop, score/win/lose feedback and restart.
 Fit a phone viewport, prevent accidental scrolling while playing, make controls large.
-Keep code compact: aim for under 4000 output tokens. Implement one mechanic well.
+Implement one mechanic well. Keep the code readable and within the output budget; simplify
+visuals rather than compressing expressions or leaving unfinished code.
+Honor an explicit user request for 2D or 3D; otherwise use the assigned rendering mode.
+For 2D use canvas/DOM. For 3D use simple world-space x/y/z geometry with camera projection,
+depth sorting and perspective on Canvas 2D; no external engine or CDN is available.
+Initialize state before drawing, use explicit DOM lookups (never implicit element-id globals),
+check canvas contexts and provide fallbacks for optional APIs such as roundRect.
+Draw a visible first frame immediately. Keep resize separate from restarting game state.
+Before returning, review every script for valid syntax, balanced delimiters, valid numeric
+literals (e.g. 0.22), defined variables and a working start, input, score and restart path.
 The surrounding app handles title, cover and publishing. Do not ask questions.
 """
 
@@ -115,11 +126,11 @@ def cooldown(headers):
     return min(86400, max(1, seconds))
 
 
-def request_game(key, model, prompt):
+def request_game(key, model, prompt, rendering_mode="2D"):
     request = urllib.request.Request(
         config.EVOMAP_BASE_URL + "/chat/completions",
         data=json.dumps({"model": model, "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}],
+            {"role": "system", "content": SYSTEM_PROMPT + "\nAssigned rendering mode: " + rendering_mode}, {"role": "user", "content": prompt}],
             "max_tokens": config.GENERATION_MAX_TOKENS, "stream": False}).encode(),
         headers={"Content-Type": "application/json", "Authorization": "Bearer " + key})
     opener = urllib.request.build_opener(NoRedirect)
@@ -153,6 +164,53 @@ def safe_limits(headers):
     return {k: str(headers[k])[:128] for k in names if k in headers}
 
 
+class GameScripts(HTMLParser):
+    """Extract executable code for parsing only; generated code is never run here."""
+    def __init__(self):
+        super().__init__()
+        self.scripts = []
+        self.current = None
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        for name, value in attrs.items():
+            if name.startswith("on") and value:
+                self.scripts.append("function handler(event){\n" + value + "\n}")
+        if tag == "script":
+            kind = (attrs.get("type") or "").strip().lower()
+            if "src" in attrs or kind == "module":
+                raise ValueError("unsupported_script")
+            if kind not in ("application/json", "application/ld+json"):
+                # Include legacy executable MIME types as well as ordinary scripts.
+                self.current = []
+
+    def handle_data(self, data):
+        if self.current is not None:
+            self.current.append(data)
+
+    def handle_endtag(self, tag):
+        if tag == "script" and self.current is not None:
+            self.scripts.append("".join(self.current))
+            self.current = None
+
+
+def validate_scripts(content):
+    parser = GameScripts()
+    parser.feed(content)
+    if parser.current is not None:
+        raise ValueError("incomplete_script")
+    # One isolated parser process; vm.Script compiles but does not execute code.
+    checker = "const vm=require('node:vm');const fs=require('node:fs');for(const s of JSON.parse(fs.readFileSync(0,'utf8')))new vm.Script(s);"
+    try:
+        result = subprocess.run(["node", "--max-old-space-size=64", "-e", checker],
+                                input=json.dumps(parser.scripts), text=True,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError("script_validator_unavailable") from error
+    if result.returncode:
+        raise ValueError("invalid_javascript")
+
+
 def normalize_html(content):
     if not isinstance(content, str):
         raise ValueError("missing_html")
@@ -165,6 +223,7 @@ def normalize_html(content):
     match = re.search(r"<head(?:\s[^>]*)?>", content, re.I)
     if not match:
         raise ValueError("missing_head")
+    validate_scripts(content)
     # Policy comes before all model-authored markup. The HTTP sandbox also
     # applies when this document is opened directly, outside the app iframe.
     policy = '<meta http-equiv="Content-Security-Policy" content="' + html_module.escape(CSP, quote=True) + '">'
@@ -219,6 +278,10 @@ def run_job(job_id):
     with db.SessionLocal() as session:
         job = session.get(Generation, job_id)
         model, prompt = job.model, job.prompt
+        # UUID-derived assignment is stable across key retries and uniformly distributed.
+        rendering_mode = "3D" if int(hashlib.sha256(job.id.encode()).hexdigest()[-1], 16) % 2 else "2D"
+        update_timings(job, rendering_mode=rendering_mode, prompt_version=2)
+        session.commit()
     excluded = set()
     reasons = set()
     while True:
@@ -232,7 +295,7 @@ def run_job(job_id):
         status, headers, data = None, {}, {}
         error = None
         try:
-            status, headers, data = request_game(raw_key, model, prompt)
+            status, headers, data = request_game(raw_key, model, prompt, rendering_mode)
         except (OSError, http.client.HTTPException, ValueError):
             # Network failure, timeout or oversized body: the completion state
             # is unknown, so no automatic retry/duplicate spending. Anything
@@ -321,7 +384,7 @@ class Worker:
                 session.commit()
                 return None
             job.status = GENERATING
-            update_timings(job, queue_ms=elapsed(job), max_tokens=config.GENERATION_MAX_TOKENS, prompt_version=1)
+            update_timings(job, queue_ms=elapsed(job), max_tokens=config.GENERATION_MAX_TOKENS, prompt_version=2)
             emit(session, job, "started", elapsed(job))
             session.commit()
             return job.id

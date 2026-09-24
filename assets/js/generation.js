@@ -18,6 +18,8 @@
   var overlay, frame, loadTimer;
   var previewJob = null;
   var previewStart = 0;
+  var previewFailed = false;
+  var signalChain = Promise.resolve();
 
   var statusMessages = {
     queued: "已排队，先来完善游戏信息。",
@@ -219,7 +221,12 @@
   function signal(kind, elapsed, keepalive) {
     if (!previewJob) return Promise.resolve();
     var elapsedMs = Math.min(86400000, Math.max(0, Math.round(elapsed || 0)));
-    return api("/" + previewJob + "/events", "POST", {kind: kind, elapsed_ms: elapsedMs}, keepalive);
+    var id = previewJob;
+    // Preserve open/error/load order even when requests have different latencies.
+    signalChain = signalChain.catch(function () {}).then(function () {
+      return api("/" + id + "/events", "POST", {kind: kind, elapsed_ms: elapsedMs}, keepalive);
+    });
+    return signalChain;
   }
 
   function ensureOverlay() {
@@ -264,6 +271,7 @@
     document.body.style.overflow = "hidden";
     previewJob = job.id;
     previewStart = performance.now();
+    previewFailed = false;
     overlay.querySelector(".generation-publish").disabled = true;
     previewMessage("正在加载游戏…");
 
@@ -277,6 +285,7 @@
 
     signal("playtest_opened", 0).catch(function () {});
     loadTimer = setTimeout(function () {
+      previewFailed = true;
       previewProblem("加载时间有点长，可以返回后再次试玩。");
       signal("playtest_timeout", performance.now() - previewStart).catch(function () {});
     }, 15000);
@@ -321,14 +330,18 @@
     if (!frame || event.source !== frame.contentWindow || !event.data) return;
     var kind = event.data.beeplay;
     var id = previewJob;
+    var sourceFrame = frame;
     if (kind === "loaded") {
       clearTimeout(loadTimer);
       signal("playtest_loaded", performance.now() - previewStart).then(function () {
-        if (previewJob !== id || !frame) return;
+        if (previewJob !== id || frame !== sourceFrame || previewFailed) return;
         overlay.querySelector(".generation-publish").disabled = false;
         previewMessage("试试操作、得分和重新开始。满意后再发布。");
       }).catch(function (error) { previewProblem(error.message); });
     } else if (kind === "error") {
+      previewFailed = true;
+      clearTimeout(loadTimer);
+      overlay.querySelector(".generation-publish").disabled = true;
       signal("playtest_error", performance.now() - previewStart).catch(function () {});
       previewProblem("游戏报告了运行错误。建议返回检查，或重新创作。");
     }

@@ -19,6 +19,9 @@ STAMP=$(date +%Y%m%d-%H%M%S)
 [ "$(id -u)" = 0 ] || { echo "FATAL: run as root" >&2; exit 1; }
 [ "$SRC" != "$APP" ] || { echo "FATAL: run from a checkout, not from $APP" >&2; exit 1; }
 
+# Fail before touching the running release if the generation parser is missing.
+node -e 'new (require("node:vm").Script)("let ok = 1;")'
+
 echo "== environment =="
 install -d -m 755 /etc/beeplay
 if [ ! -f /etc/beeplay/beeplay.env ]; then

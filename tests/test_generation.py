@@ -264,6 +264,50 @@ class GenerationTests(test_http.HttpTestCase):
         self.client.post(f"/api/generations/{id}/events", json={"kind": "playtest_loaded"})
         self.assertEqual(self.client.post(f"/api/generations/{id}/publish", json={"title": "Draft"}).status_code, 422)
 
+    def test_robot_arm_syntax_error_never_becomes_ready(self):
+        id = self.submit().json()["id"]
+        broken = HTML.replace("let score = 0;", "shape(o.type,o.tx,o.ty,17,o.color,o.22)")
+        response = (200, {}, {"choices": [{"finish_reason": "stop", "message": {"content": broken}}]})
+        result = self.run_job(id, response)
+        self.assertEqual(result["error"], "invalid_game")
+        self.assertEqual(self.client.get(f"/api/generations/{id}/preview").status_code, 409)
+        generation.normalize_html(broken.replace("o.color,o.22", "o.color,0.22"))
+
+    def test_parser_does_not_execute_generated_code_and_fails_closed(self):
+        generation.normalize_html(HTML.replace("let score = 0;", "throw new Error('must not execute');"))
+        with patch.object(generation.subprocess, "run", side_effect=FileNotFoundError):
+            with self.assertRaisesRegex(ValueError, "validator_unavailable"):
+                generation.normalize_html(HTML)
+        with self.assertRaises(ValueError):
+            generation.normalize_html(HTML.replace("<script>", '<script type="module">'))
+        with self.assertRaises(ValueError):
+            generation.normalize_html(HTML.replace("this.textContent=", "this..textContent="))
+
+    def test_preview_failure_blocks_publish_in_either_event_order(self):
+        id = self.ready_job()
+        for kinds in (("playtest_loaded", "playtest_error"),
+                      ("playtest_error", "playtest_loaded"),
+                      ("playtest_timeout", "playtest_loaded")):
+            self.client.post(f"/api/generations/{id}/events", json={"kind": "playtest_opened"})
+            for kind in kinds:
+                self.client.post(f"/api/generations/{id}/events", json={"kind": kind})
+            self.assertFalse(self.client.get(f"/api/generations/{id}").json()["playtested"])
+            self.assertEqual(self.client.post(f"/api/generations/{id}/publish", json=DETAILS).status_code, 409)
+        self.playtest(id)
+        with patch.object(events, "alert"):
+            self.assertEqual(self.client.post(f"/api/generations/{id}/publish", json=DETAILS).status_code, 200)
+
+    def test_rendering_assignment_survives_key_retry(self):
+        id = self.submit().json()["id"]
+        with patch.object(generation, "request_game", side_effect=[(429, {}, {}), SUCCESS]) as request:
+            generation.run_job(id)
+        modes = [call.args[3] for call in request.call_args_list]
+        self.assertEqual(modes[0], modes[1])
+        self.assertIn(modes[0], ("2D", "3D"))
+        job = self.client.get(f"/api/generations/{id}").json()
+        self.assertEqual(job["timings"]["rendering_mode"], modes[0])
+        self.assertEqual(job["timings"]["prompt_version"], 2)
+
     def test_document_policy_precedes_all_model_code(self):
         document = generation.normalize_html(HTML.replace("<html>", "<script>bad()</script><html>"))
         self.assertLess(document.index("Content-Security-Policy"), document.index("bad()"))
