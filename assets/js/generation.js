@@ -18,6 +18,8 @@
   var overlay, frame, loadTimer;
   var previewJob = null;
   var previewStart = 0;
+  // The playtest_loaded signal; publish waits for it, but only briefly.
+  var loadedSignal = null;
 
   var statusMessages = {
     queued: "已排队，先来完善游戏信息。",
@@ -75,16 +77,37 @@
     if (node) node.inert = inert;
   }
 
+  // Resolves with the promise's value, or with undefined after ms.
+  function within(promise, ms) {
+    return Promise.race([promise, new Promise(function (resolve) { setTimeout(resolve, ms); })]);
+  }
+
+  // Some in-app browsers (Quark) wrap fetch and can leave a request pending
+  // forever, so every call fails after 20 s instead of hanging the page.
   async function api(path, method, body, keepalive) {
     var hasBody = body !== undefined;
-    var response = await fetch("/api/generations" + path, {
+    var controller = window.AbortController ? new AbortController() : null;
+    var timer = setTimeout(function () { if (controller) controller.abort(); }, 20000);
+    var request = fetch("/api/generations" + path, {
       method: method || "GET",
       credentials: "same-origin",
       cache: "no-store",
       headers: hasBody ? {"Content-Type": "application/json"} : {},
       body: hasBody ? JSON.stringify(body) : undefined,
-      keepalive: !!keepalive
+      keepalive: !!keepalive,
+      signal: controller ? controller.signal : undefined
     });
+    var timeout = new Promise(function (_, reject) {
+      setTimeout(function () { reject(new Error("网络请求超时，请重试。")); }, 20000);
+    });
+    var response;
+    try {
+      response = await Promise.race([request, timeout]);
+    } catch (error) {
+      throw error.name === "AbortError" ? new Error("网络请求超时，请重试。") : error;
+    } finally {
+      clearTimeout(timer);
+    }
     if (response.status === 204) return null;
     var data = await response.json();
     if (!response.ok) {
@@ -264,6 +287,7 @@
     document.body.style.overflow = "hidden";
     previewJob = job.id;
     previewStart = performance.now();
+    loadedSignal = null;
     overlay.querySelector(".generation-publish").disabled = true;
     previewMessage("正在加载游戏…");
 
@@ -304,6 +328,9 @@
     button.disabled = true;
     previewMessage("正在发布…");
     try {
+      // The server needs playtest_loaded recorded first; don't wait on a
+      // response the browser may never deliver.
+      if (loadedSignal) await within(loadedSignal.catch(function () {}), 5000);
       var published = await api("/" + previewJob + "/publish", "POST", readDetails());
       closePreview();
       job.status = "published";
@@ -323,11 +350,13 @@
     var id = previewJob;
     if (kind === "loaded") {
       clearTimeout(loadTimer);
-      signal("playtest_loaded", performance.now() - previewStart).then(function () {
-        if (previewJob !== id || !frame) return;
-        overlay.querySelector(".generation-publish").disabled = false;
-        previewMessage("试试操作、得分和重新开始。满意后再发布。");
-      }).catch(function (error) { previewProblem(error.message); });
+      // Enable publish now, not when the signal's response arrives: Quark
+      // never resolved that 204, which left the button greyed out.
+      loadedSignal = signal("playtest_loaded", performance.now() - previewStart);
+      loadedSignal.catch(function (error) { if (previewJob === id) previewProblem(error.message); });
+      if (previewJob !== id || !frame) return;
+      overlay.querySelector(".generation-publish").disabled = false;
+      previewMessage("试试操作、得分和重新开始。满意后再发布。");
     } else if (kind === "error") {
       signal("playtest_error", performance.now() - previewStart).catch(function () {});
       previewProblem("游戏报告了运行错误。建议返回检查，或重新创作。");
