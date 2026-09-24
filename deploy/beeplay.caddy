@@ -7,15 +7,21 @@ beeplay.top {
 		-Server
 	}
 
+	# Long caching is for successful responses only. On 2026-09-24 a week-cached
+	# 403 kept phones broken long after the files were readable again.
 	handle_path /assets/* {
 		root * /srv/beeplay/assets
-		header Cache-Control "public, max-age=604800"
+		header Cache-Control "public, max-age=604800" {
+			match status 2xx 304
+		}
 		file_server
 	}
 
 	handle_path /games/* {
 		root * /var/lib/beeplay/games
-		header Cache-Control "public, max-age=31536000, immutable"
+		header Cache-Control "public, max-age=31536000, immutable" {
+			match status 2xx 304
+		}
 		# Uploaded and generated games are untrusted: run them in an opaque
 		# origin even when opened directly, matching the in-app iframe.
 		header Content-Security-Policy "sandbox allow-scripts"
@@ -29,7 +35,9 @@ beeplay.top {
 	handle_path /avatars/* {
 		root * /var/lib/beeplay/avatars
 		# Named by a hash of their contents: a new photo is a new URL.
-		header Cache-Control "public, max-age=31536000, immutable"
+		header Cache-Control "public, max-age=31536000, immutable" {
+			match status 2xx 304
+		}
 		header X-Content-Type-Options "nosniff"
 		file_server
 	}

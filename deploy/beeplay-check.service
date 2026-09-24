@@ -1,0 +1,28 @@
+# /etc/systemd/system/beeplay-check.service, run every 5 minutes by
+# beeplay-check.timer: loads beeplay.top through Caddy and tells the Lark group
+# when it breaks and when it recovers. release.sh installs both units.
+[Unit]
+Description=Check beeplay.top through Caddy, alert Lark on change
+After=network-online.target caddy.service beeplay.service
+
+[Service]
+Type=oneshot
+User=beeplay
+Group=beeplay
+# check.state (the last result) lives next to the database.
+StateDirectory=beeplay
+# BEEPLAY_RELEASE_WEBHOOK and its secret.
+EnvironmentFile=/etc/beeplay/beeplay.env
+ExecStart=/usr/local/bin/beeplay-check --alert
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true

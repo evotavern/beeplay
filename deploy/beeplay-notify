@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""Installed as /usr/local/bin/beeplay-notify. Posts a text message to the
+🐝蜂玩BeePlay Lark group through its webhook bot:
+
+    beeplay-notify "text"        or        echo text | beeplay-notify
+
+BEEPLAY_RELEASE_WEBHOOK is the bot's URL, and BEEPLAY_RELEASE_WEBHOOK_SECRET
+its signing secret when the bot has 签名校验 on. Both come from the
+environment, or else from /etc/beeplay/beeplay.env. Without a URL the message
+is only printed. Exits 1 when Lark refuses it, so callers can try again.
+"""
+
+import base64
+import hashlib
+import hmac
+import json
+import os
+import sys
+import time
+import urllib.request
+
+ENV_FILE = os.environ.get("BEEPLAY_ENV_FILE", "/etc/beeplay/beeplay.env")
+
+
+def setting(name: str) -> str:
+    if name in os.environ:
+        return os.environ[name].strip()
+    try:
+        with open(ENV_FILE, encoding="utf-8") as env:
+            for line in env:
+                key, sep, value = line.strip().partition("=")
+                if sep and key == name:
+                    return value.strip().strip("'\"")
+    except OSError:
+        pass
+    return ""
+
+
+def signature(secret: str, timestamp: int) -> str:
+    """Lark's scheme: HMAC-SHA256 keyed with "timestamp\\nsecret", of nothing."""
+    key = f"{timestamp}\n{secret}".encode()
+    return base64.b64encode(hmac.new(key, b"", hashlib.sha256).digest()).decode()
+
+
+def main(argv: list[str]) -> int:
+    text = " ".join(argv[1:]) if len(argv) > 1 else sys.stdin.read()
+    text = text.strip()
+    if not text:
+        print("beeplay-notify: nothing to send", file=sys.stderr)
+        return 2
+    url = setting("BEEPLAY_RELEASE_WEBHOOK")
+    if not url:
+        print(f"beeplay-notify: BEEPLAY_RELEASE_WEBHOOK is not set; not sent: {text}", file=sys.stderr)
+        return 0
+    payload: dict = {"msg_type": "text", "content": {"text": text}}
+    secret = setting("BEEPLAY_RELEASE_WEBHOOK_SECRET")
+    if secret:
+        timestamp = int(time.time())
+        payload.update(timestamp=str(timestamp), sign=signature(secret, timestamp))
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload, ensure_ascii=False).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            answer = json.loads(response.read() or b"{}")
+    except Exception as error:  # network, HTTP or JSON: all mean "not delivered"
+        print(f"beeplay-notify: not delivered: {error!r}", file=sys.stderr)
+        return 1
+    # Lark answers 200 either way; a refusal carries a nonzero code.
+    code = answer.get("code", answer.get("StatusCode", 0))
+    if code not in (0, None):
+        print(f"beeplay-notify: Lark refused it: {answer}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
