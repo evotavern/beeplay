@@ -18,6 +18,14 @@ class AssetUrlTests(unittest.TestCase):
         bare = re.findall(r'(?:src|href)="/?assets/[^"{]*"', shell)
         self.assertEqual(bare, [])
 
+    def test_favicon_is_served_at_the_path_browsers_request(self) -> None:
+        from fastapi.testclient import TestClient
+
+        response = TestClient(main.app).get("/favicon.ico")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "image/png")
+        self.assertIn('rel="icon"', (config.BASE_DIR / "app" / "templates" / "base.html").read_text())
+
 
 if __name__ == "__main__":
     unittest.main()

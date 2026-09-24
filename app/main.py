@@ -119,6 +119,16 @@ async def log_failed_requests(request: Request, call_next) -> Response:
 
 app.mount("/assets", StaticFiles(directory=BASE_DIR / "assets"), name="assets")
 
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    # Browsers ask for this path unprompted; without it every visit logs a 404.
+    return Response(
+        (BASE_DIR / "assets" / "icons" / "beeplay-logo.png").read_bytes(),
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
 # Development convenience: in production Caddy serves /games/* straight from
 # disk, so game files never go through uvicorn's threadpool.
 class GameFiles(StaticFiles):
